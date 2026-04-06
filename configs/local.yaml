@@ -1,0 +1,9 @@
+run:
+  seed: 7
+  generations: 12
+
+evolution:
+  population_size: 40
+  max_nodes: 20
+  max_conns: 40
+

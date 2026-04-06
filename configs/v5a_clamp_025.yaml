@@ -1,0 +1,2 @@
+plasticity:
+  delta_w_clamp: 0.25

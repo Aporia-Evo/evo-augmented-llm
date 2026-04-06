@@ -1,0 +1,23 @@
+mutation:
+  eta_init_mean: 0.0
+  eta_init_std: 0.02
+  eta_mutate_power: 0.02
+  eta_lower_bound: -0.1
+  eta_upper_bound: 0.1
+  plastic_a_init_mean: 1.0
+  plastic_a_init_std: 0.25
+  plastic_a_mutate_power: 0.1
+  plastic_a_mutate_rate: 0.3
+  plastic_a_replace_rate: 0.02
+  plastic_a_lower_bound: -2.0
+  plastic_a_upper_bound: 2.0
+  plastic_d_init_mean: 0.0
+  plastic_d_init_std: 0.05
+  plastic_d_mutate_power: 0.05
+  plastic_d_mutate_rate: 0.3
+  plastic_d_replace_rate: 0.02
+  plastic_d_lower_bound: -1.0
+  plastic_d_upper_bound: 0.0
+
+plasticity:
+  delta_w_clamp: 0.5

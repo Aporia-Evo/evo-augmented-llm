@@ -1,0 +1,2 @@
+-r requirements.txt
+jax[cuda13]>=0.4.28

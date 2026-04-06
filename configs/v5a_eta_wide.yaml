@@ -1,0 +1,6 @@
+mutation:
+  eta_init_mean: 0.0
+  eta_init_std: 0.04
+  eta_mutate_power: 0.04
+  eta_lower_bound: -0.2
+  eta_upper_bound: 0.2

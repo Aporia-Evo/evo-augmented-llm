@@ -1,0 +1,15 @@
+task:
+  name: event_memory
+  activation_steps: 4
+  temporal_delay_steps: 4
+
+run:
+  run_id_prefix: event-memory-v4
+
+online:
+  max_steps: 96
+  replacement_interval: 6
+  metrics_interval: 4
+
+evolution:
+  population_size: 20

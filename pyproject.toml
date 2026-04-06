@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neat-xor-spacetimedb-v1"
+version = "0.1.0"
+description = "Small local V1 neuroevolution demo with TensorNEAT and SpacetimeDB."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "jax>=0.4.28",
+  "numpy>=1.26.0",
+  "PyYAML>=6.0.1",
+  "requests>=2.32.0",
+  "sympy>=1.12.0",
+]
+
+[project.optional-dependencies]
+gpu = [
+  "jax[cuda13]>=0.4.28",
+]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["main", "config"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["evolve*", "tasks*", "db*", "ui*", "utils*", "tensorneat*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

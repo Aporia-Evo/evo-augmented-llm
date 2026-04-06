@@ -1,0 +1,11 @@
+task:
+  name: bit_memory
+  activation_steps: 4
+  temporal_delay_steps: 1
+
+run:
+  generations: 24
+  run_id_prefix: bit-memory-v1
+
+evolution:
+  population_size: 56

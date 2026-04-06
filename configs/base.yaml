@@ -1,0 +1,97 @@
+task:
+  name: xor
+  activation_steps: 5
+  temporal_delay_steps: 1
+
+run:
+  seed: 42
+  generations: 15
+  elite_top_k: 3
+  run_id_prefix: xor-v1
+  variant: stateful
+
+evolution:
+  population_size: 48
+  species_size: 8
+  max_nodes: 24
+  max_conns: 48
+  survival_threshold: 0.2
+  compatibility_threshold: 2.0
+  species_elitism: 1
+  genome_elitism: 2
+  max_stagnation: 12
+  spawn_number_change_rate: 0.5
+  min_species_size: 2
+  species_number_calculate_by: rank
+
+mutation:
+  conn_add: 0.25
+  conn_delete: 0.0
+  node_add: 0.12
+  node_delete: 0.0
+  weight_mutate_power: 0.35
+  weight_mutate_rate: 0.8
+  weight_replace_rate: 0.05
+  weight_init_std: 1.0
+  weight_lower_bound: -4.0
+  weight_upper_bound: 4.0
+  enabled_toggle_rate: 0.08
+  eta_mutate_power: 0.05
+  eta_mutate_rate: 0.3
+  eta_replace_rate: 0.02
+  eta_init_mean: 0.0
+  eta_init_std: 0.05
+  eta_lower_bound: -0.5
+  eta_upper_bound: 0.5
+  plastic_a_mutate_power: 0.1
+  plastic_a_mutate_rate: 0.3
+  plastic_a_replace_rate: 0.02
+  plastic_a_init_mean: 1.0
+  plastic_a_init_std: 0.25
+  plastic_a_lower_bound: -2.0
+  plastic_a_upper_bound: 2.0
+  plastic_d_mutate_power: 0.05
+  plastic_d_mutate_rate: 0.3
+  plastic_d_replace_rate: 0.02
+  plastic_d_init_mean: 0.0
+  plastic_d_init_std: 0.05
+  plastic_d_lower_bound: -1.0
+  plastic_d_upper_bound: 0.0
+  bias_mutate_power: 0.25
+  bias_mutate_rate: 0.7
+  bias_replace_rate: 0.05
+  bias_init_std: 0.75
+  bias_lower_bound: -3.0
+  bias_upper_bound: 3.0
+  alpha_mutate_power: 0.15
+  alpha_mutate_rate: 0.6
+  alpha_replace_rate: 0.05
+  alpha_init_mean: 0.35
+  alpha_init_std: 0.15
+  alpha_slow_mutate_power: 0.08
+  alpha_slow_mutate_rate: 0.6
+  alpha_slow_replace_rate: 0.05
+  alpha_slow_init_mean: 0.85
+  alpha_slow_init_std: 0.08
+  slow_input_gain_mutate_power: 0.1
+  slow_input_gain_mutate_rate: 0.6
+  slow_input_gain_replace_rate: 0.05
+  slow_input_gain_init_mean: 0.35
+  slow_input_gain_init_std: 0.12
+  slow_input_gain_lower_bound: -2.0
+  slow_input_gain_upper_bound: 2.0
+  slow_output_gain_mutate_power: 0.15
+  slow_output_gain_mutate_rate: 0.6
+  slow_output_gain_replace_rate: 0.05
+  slow_output_gain_init_mean: 1.0
+  slow_output_gain_init_std: 0.2
+  slow_output_gain_lower_bound: -2.0
+  slow_output_gain_upper_bound: 2.0
+
+plasticity:
+  delta_w_clamp: 1.0
+
+spacetimedb:
+  server_url: http://127.0.0.1:3000
+  database_name: neat-xor-v1
+  timeout_seconds: 10.0

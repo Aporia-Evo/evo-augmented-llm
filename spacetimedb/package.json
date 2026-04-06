@@ -1,0 +1,12 @@
+{
+  "name": "neat-xor-spacetimedb",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "spacetimedb": "^1.7.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}
+

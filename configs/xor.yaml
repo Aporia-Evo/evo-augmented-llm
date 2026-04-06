@@ -1,0 +1,7 @@
+task:
+  name: xor
+  activation_steps: 6
+
+run:
+  generations: 20
+

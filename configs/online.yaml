@@ -1,0 +1,12 @@
+run:
+  mode: online
+  run_id_prefix: online-neat-v4
+
+online:
+  active_population_size: 20
+  max_steps: 80
+  replacement_interval: 6
+  metrics_interval: 4
+  success_window: 16
+  rolling_score_alpha: 0.35
+  hall_of_fame_top_k: 16

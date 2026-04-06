@@ -1,0 +1,18 @@
+task:
+  name: key_value_memory
+  key_value_profile: kv_easy
+  activation_steps: 4
+  temporal_delay_steps: 3
+  evaluation_delay_steps: [3]
+  curriculum_phase_1_delay_steps: [3]
+  curriculum_phase_2_delay_steps: [5]
+  curriculum_phase_1_key_value_profile: kv_easy
+  curriculum_phase_2_key_value_profile: kv_mid
+
+run:
+  generations: 12
+  elite_top_k: 3
+  run_id_prefix: key-value-memory-easy-v1
+
+evolution:
+  population_size: 40
