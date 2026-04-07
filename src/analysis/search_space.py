@@ -242,6 +242,10 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
     mean_distractor_competition_score = _safe_mean([record.distractor_competition_score for record in records])
     mean_slow_query_coupling = _safe_mean([record.slow_query_coupling for record in records])
     mean_retrieval_state_alignment = _safe_mean([record.retrieval_state_alignment for record in records])
+    mean_store_vs_distractor_write_gap = _safe_mean([record.store_vs_distractor_write_gap for record in records])
+    mean_query_value_read_strength = _safe_mean([record.query_value_read_strength for record in records])
+    mean_readout_selectivity = _safe_mean([record.readout_selectivity for record in records])
+    mean_query_key_alignment_v11 = _safe_mean([record.query_key_alignment for record in records])
     mean_score_over_delays = _safe_mean([record.mean_score_over_delays for record in records])
     mean_delay_score_std = _safe_mean([record.delay_score_std for record in records])
     mean_delay_score_range = _safe_mean([record.delay_score_range for record in records])
@@ -319,6 +323,23 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
 
         if mean_distractor_competition_score >= 0.5:
             hints.append("Distraktoren konkurrieren sichtbar mit dem Zielsignal; der Retrieval-Pfad ist noch anfaellig fuer falsche Attraktoren.")
+
+        if mean_store_vs_distractor_write_gap <= 0.05:
+            hints.append("Schreibpfad trennt Store und Distraktor noch nicht sauber; das Write-Gate bleibt zu undifferenziert.")
+        elif mean_store_vs_distractor_write_gap >= 0.2:
+            hints.append("Store-Schritte schreiben deutlich staerker als Distraktoren; der Write-Pfad zeigt gute Selektivitaet.")
+
+        if mean_query_key_alignment_v11 <= 0.25:
+            hints.append("Query-Match bleibt schwach; die Query koppelt nur locker an den relevanten Key-Zustand.")
+
+        if mean_query_value_read_strength <= 0.2:
+            hints.append("Value-Readout ist vorhanden, aber zu instabil; Query-getriebene Auslesestaerke bleibt niedrig.")
+
+        if mean_query_key_alignment_v11 >= 0.5 and mean_query_value_read_strength <= 0.3:
+            hints.append("Key/Value-Trennung ist messbar, aber noch nicht funktional ausreichend fuer robustes Value-Retrieval.")
+
+        if mean_readout_selectivity >= 0.25:
+            hints.append("Readout bleibt zwischen Query und Distraktor klar getrennt; der Abrufpfad wirkt selektiver.")
 
         if mean_retrieval_state_alignment >= 0.75:
             hints.append("Store- und Query-Zustand bleiben gut ausgerichtet; relevante Information wird intern relativ konsistent weitergetragen.")

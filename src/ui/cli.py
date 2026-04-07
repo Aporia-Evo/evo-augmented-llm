@@ -157,6 +157,8 @@ class GenerationBenchmarkRow:
     query_key_match_score: float | None = None
     value_margin: float | None = None
     distractor_competition_score: float | None = None
+    store_vs_distractor_write_gap: float | None = None
+    query_value_read_strength: float | None = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +188,8 @@ class GenerationSuiteAggregate:
     mean_query_key_match_score: float | None = None
     mean_value_margin: float | None = None
     mean_distractor_competition_score: float | None = None
+    mean_store_vs_distractor_write_gap: float | None = None
+    mean_query_value_read_strength: float | None = None
 
 
 class CliObserver:
@@ -1197,6 +1201,8 @@ def _build_generation_benchmark_row(
         query_key_match_score=_coerce_optional_metric(best_candidate_metrics.get("query_key_match_score")),
         value_margin=_coerce_optional_metric(best_candidate_metrics.get("value_margin")),
         distractor_competition_score=_coerce_optional_metric(best_candidate_metrics.get("distractor_competition_score")),
+        store_vs_distractor_write_gap=_coerce_optional_metric(best_candidate_metrics.get("store_vs_distractor_write_gap")),
+        query_value_read_strength=_coerce_optional_metric(best_candidate_metrics.get("query_value_read_strength")),
     )
 
 
@@ -1316,6 +1322,16 @@ def _build_generation_suite_aggregates(rows: list[GenerationBenchmarkRow]) -> li
             for row in grouped_rows
             if row.distractor_competition_score is not None
         ]
+        store_vs_distractor_write_gaps = [
+            float(row.store_vs_distractor_write_gap)
+            for row in grouped_rows
+            if row.store_vs_distractor_write_gap is not None
+        ]
+        query_value_read_strengths = [
+            float(row.query_value_read_strength)
+            for row in grouped_rows
+            if row.query_value_read_strength is not None
+        ]
         aggregates.append(
             GenerationSuiteAggregate(
                 task_name=task_name,
@@ -1371,6 +1387,16 @@ def _build_generation_suite_aggregates(rows: list[GenerationBenchmarkRow]) -> li
                     if distractor_competition_scores
                     else None
                 ),
+                mean_store_vs_distractor_write_gap=(
+                    (sum(store_vs_distractor_write_gaps) / len(store_vs_distractor_write_gaps))
+                    if store_vs_distractor_write_gaps
+                    else None
+                ),
+                mean_query_value_read_strength=(
+                    (sum(query_value_read_strengths) / len(query_value_read_strengths))
+                    if query_value_read_strengths
+                    else None
+                ),
             )
         )
     return aggregates
@@ -1424,6 +1450,8 @@ def _write_generation_suite_exports(
                 "mean_query_key_match_score",
                 "mean_value_margin",
                 "mean_distractor_competition_score",
+                "mean_store_vs_distractor_write_gap",
+                "mean_query_value_read_strength",
             ],
         )
         writer.writeheader()
@@ -1610,6 +1638,36 @@ def _render_generation_suite_markdown(
             ]
         )
         sections.append("")
+        if any(
+            aggregate.mean_store_vs_distractor_write_gap is not None
+            or aggregate.mean_query_value_read_strength is not None
+            for aggregate in retrieval_diagnostic_aggregates
+        ):
+            sections.extend(
+                [
+                    "## KV Selectivity Diagnostics",
+                    "",
+                    "| task | delay | variant | mean_store_vs_distractor_write_gap | mean_query_value_read_strength |",
+                    "| --- | --- | --- | --- | --- |",
+                ]
+            )
+            sections.extend(
+                [
+                    "| "
+                    + " | ".join(
+                        [
+                            aggregate.task_name,
+                            aggregate.evaluation_delay_steps_label or str(aggregate.delay_steps),
+                            aggregate.variant,
+                            _format_optional_float(aggregate.mean_store_vs_distractor_write_gap, precision=3),
+                            _format_optional_float(aggregate.mean_query_value_read_strength, precision=3),
+                        ]
+                    )
+                    + " |"
+                    for aggregate in retrieval_diagnostic_aggregates
+                ]
+            )
+            sections.append("")
     return "\n".join(sections)
 
 

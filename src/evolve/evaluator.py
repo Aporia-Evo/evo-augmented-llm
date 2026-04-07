@@ -896,6 +896,13 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
             "mean_value_state_during_store": 0.0,
             "mean_key_state_during_query": 0.0,
             "mean_value_state_during_query": 0.0,
+            "write_gate_at_store": 0.0,
+            "write_gate_at_distractor": 0.0,
+            "write_gate_at_query": 0.0,
+            "store_vs_distractor_write_gap": 0.0,
+            "mean_match_signal": 0.0,
+            "value_state_at_query": 0.0,
+            "key_state_at_query": 0.0,
         }
     return {
         "plasticity_enabled": metrics.plasticity_enabled,
@@ -948,6 +955,13 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
         "mean_value_state_during_store": metrics.mean_value_state_during_store,
         "mean_key_state_during_query": metrics.mean_key_state_during_query,
         "mean_value_state_during_query": metrics.mean_value_state_during_query,
+        "write_gate_at_store": metrics.write_gate_at_store,
+        "write_gate_at_distractor": metrics.write_gate_at_distractor,
+        "write_gate_at_query": metrics.write_gate_at_query,
+        "store_vs_distractor_write_gap": metrics.store_vs_distractor_write_gap,
+        "mean_match_signal": metrics.mean_match_signal,
+        "value_state_at_query": metrics.value_state_at_query,
+        "key_state_at_query": metrics.key_state_at_query,
     }
 
 
@@ -1032,6 +1046,13 @@ def _aggregate_episode_metrics(metrics: Sequence[PlasticityEpisodeMetrics]) -> P
         mean_value_state_during_store=float(np.mean([metric.mean_value_state_during_store for metric in metrics])),
         mean_key_state_during_query=float(np.mean([metric.mean_key_state_during_query for metric in metrics])),
         mean_value_state_during_query=float(np.mean([metric.mean_value_state_during_query for metric in metrics])),
+        write_gate_at_store=float(np.mean([metric.write_gate_at_store for metric in metrics])),
+        write_gate_at_distractor=float(np.mean([metric.write_gate_at_distractor for metric in metrics])),
+        write_gate_at_query=float(np.mean([metric.write_gate_at_query for metric in metrics])),
+        store_vs_distractor_write_gap=float(np.mean([metric.store_vs_distractor_write_gap for metric in metrics])),
+        mean_match_signal=float(np.mean([metric.mean_match_signal for metric in metrics])),
+        value_state_at_query=float(np.mean([metric.value_state_at_query for metric in metrics])),
+        key_state_at_query=float(np.mean([metric.key_state_at_query for metric in metrics])),
     )
 
 

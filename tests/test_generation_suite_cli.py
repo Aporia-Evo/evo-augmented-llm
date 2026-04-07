@@ -366,6 +366,8 @@ def test_benchmark_suite_key_value_memory_supports_profile_overrides(tmp_path: P
     markdown = (tmp_path / "kv-suite.md").read_text(encoding="utf-8")
     assert "## Retrieval Diagnostics" in markdown
     assert "mean_correct_key_selected" in markdown
+    assert "## KV Selectivity Diagnostics" in markdown
+    assert "mean_store_vs_distractor_write_gap" in markdown
     feature_rows = [
         json.loads(line)
         for line in (tmp_path / "kv-suite.candidate-features.jsonl").read_text(encoding="utf-8").splitlines()

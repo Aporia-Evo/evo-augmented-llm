@@ -40,7 +40,7 @@ ARCHIVE_DESCRIPTOR_VERSION_RETRIEVAL_STRATEGY = "v9a-retrieval-v1"
 ARCHIVE_DESCRIPTOR_VERSION_RETRIEVAL_MECHANISM = "v9b-retrieval-v1"
 ARCHIVE_DESCRIPTOR_VERSION_GATING_MECHANISM = "v10a-gating-v1"
 ARCHIVE_DESCRIPTOR_VERSION_CONTENT_RETRIEVAL = "v10c-content-v1"
-ARCHIVE_DESCRIPTOR_VERSION_KV_RETRIEVAL_MECHANISM = "v11a-kv-v1"
+ARCHIVE_DESCRIPTOR_VERSION_KV_RETRIEVAL_MECHANISM = "v11b-kv-v1"
 
 
 @dataclass(frozen=True)
@@ -86,6 +86,8 @@ def build_archive_cell(
         gate_selectivity=feature_record.gate_selectivity,
         match_selectivity=feature_record.match_selectivity,
         query_key_alignment=feature_record.query_key_alignment,
+        store_vs_distractor_write_gap=feature_record.store_vs_distractor_write_gap,
+        readout_selectivity=feature_record.readout_selectivity,
         curriculum_enabled=feature_record.curriculum_enabled,
         curriculum_phase_1_delays=feature_record.curriculum_phase_1_delays,
         curriculum_phase_2_delays=feature_record.curriculum_phase_2_delays,
@@ -147,6 +149,8 @@ def build_archive_descriptor(
     gate_selectivity: float = 0.0,
     match_selectivity: float = 0.0,
     query_key_alignment: float = 0.0,
+    store_vs_distractor_write_gap: float = 0.0,
+    readout_selectivity: float = 0.0,
     curriculum_enabled: bool = False,
     curriculum_phase_1_delays: str = "",
     curriculum_phase_2_delays: str = "",
@@ -156,7 +160,7 @@ def build_archive_descriptor(
     qd_profile: str = DEFAULT_QD_PROFILE,
 ) -> ArchiveDescriptor:
     profile = archive_profile_definition(qd_profile)
-    return profile.builder(
+    builder_kwargs = dict(
         final_max_score=final_max_score,
         score_ceiling=score_ceiling,
         mean_score_over_delays=mean_score_over_delays,
@@ -178,6 +182,10 @@ def build_archive_descriptor(
         curriculum_phase=curriculum_phase,
         active_evaluation_delays=active_evaluation_delays,
     )
+    if qd_profile == QD_PROFILE_KV_RETRIEVAL_MECHANISM:
+        builder_kwargs["store_vs_distractor_write_gap"] = store_vs_distractor_write_gap
+        builder_kwargs["readout_selectivity"] = readout_selectivity
+    return profile.builder(**builder_kwargs)
 
 
 def archive_profile_names(*, task_name: str | None = None) -> tuple[str, ...]:
@@ -726,6 +734,8 @@ def _build_kv_retrieval_mechanism_descriptor(
     gate_selectivity: float,
     match_selectivity: float,
     query_key_alignment: float,
+    store_vs_distractor_write_gap: float,
+    readout_selectivity: float,
     curriculum_enabled: bool,
     curriculum_phase_1_delays: str,
     curriculum_phase_2_delays: str,
@@ -735,11 +745,10 @@ def _build_kv_retrieval_mechanism_descriptor(
 ) -> ArchiveDescriptor:
     del mean_score_over_delays, delay_score_std, slow_fast_contribution_ratio, enabled_conn_count
     del retrieval_score, query_accuracy, relevant_token_retention, distractor_suppression_ratio, slow_query_coupling
-    del gate_selectivity, match_selectivity, curriculum_enabled, curriculum_phase_1_delays, curriculum_phase_2_delays, curriculum_switch_generation, curriculum_phase, active_evaluation_delays
+    del gate_selectivity, match_selectivity, query_key_alignment, curriculum_enabled, curriculum_phase_1_delays, curriculum_phase_2_delays, curriculum_switch_generation, curriculum_phase, active_evaluation_delays
     normalized_score, score_bin, safe_score_ceiling = _normalized_score(final_max_score, score_ceiling)
-    safe_alignment = max(0.0, min(1.0, float(query_key_alignment)))
-    alignment_bin = _bin_value(safe_alignment, upper_bound=1.0, bin_count=8)
-    descriptor_key = f"scorebin_{score_bin}|alignbin_{alignment_bin}"
+    safe_write_gap = max(-1.0, min(1.0, float(store_vs_distractor_write_gap)))
+    write_gap_bin = _bin_value(safe_write_gap + 1.0, upper_bound=2.0, bin_count=8)
     descriptor_values_json = stable_json_dumps(
         {
             "qd_profile": QD_PROFILE_KV_RETRIEVAL_MECHANISM,
@@ -749,18 +758,20 @@ def _build_kv_retrieval_mechanism_descriptor(
             "normalized_score": round(normalized_score, 10),
             "score_bin": score_bin,
             "score_bin_count": ARCHIVE_SCORE_BINS,
-            "query_key_alignment": round(safe_alignment, 10),
-            "query_key_alignment_bin": alignment_bin,
-            "query_key_alignment_bin_count": 8,
+            "store_vs_distractor_write_gap": round(safe_write_gap, 10),
+            "store_vs_distractor_write_gap_bin": write_gap_bin,
+            "store_vs_distractor_write_gap_bin_count": 8,
+            "readout_selectivity": round(max(0.0, float(readout_selectivity)), 10),
         }
     )
+    descriptor_key = f"scorebin_{score_bin}|writegapbin_{write_gap_bin}"
     return ArchiveDescriptor(
         qd_profile=QD_PROFILE_KV_RETRIEVAL_MECHANISM,
         descriptor_schema_version=ARCHIVE_DESCRIPTOR_VERSION_KV_RETRIEVAL_MECHANISM,
         descriptor_key=descriptor_key,
         descriptor_values_json=descriptor_values_json,
         score_bin=score_bin,
-        secondary_bin=alignment_bin,
+        secondary_bin=write_gap_bin,
     )
 
 
@@ -874,9 +885,9 @@ ARCHIVE_PROFILES: dict[str, ArchiveProfileDefinition] = {
     QD_PROFILE_KV_RETRIEVAL_MECHANISM: ArchiveProfileDefinition(
         name=QD_PROFILE_KV_RETRIEVAL_MECHANISM,
         descriptor_schema_version=ARCHIVE_DESCRIPTOR_VERSION_KV_RETRIEVAL_MECHANISM,
-        secondary_axis_label="query_key_alignment",
-        secondary_axis_value_key="query_key_alignment",
-        secondary_axis_bin_key="query_key_alignment_bin",
+        secondary_axis_label="store_vs_distractor_write_gap",
+        secondary_axis_value_key="store_vs_distractor_write_gap",
+        secondary_axis_bin_key="store_vs_distractor_write_gap_bin",
         secondary_axis_bin_count=8,
         total_cells_per_delay=ARCHIVE_SCORE_BINS * 8,
         builder=_build_kv_retrieval_mechanism_descriptor,

@@ -280,6 +280,13 @@ class CandidateFeatureRecord:
     mean_value_state_during_store: float = 0.0
     mean_key_state_during_query: float = 0.0
     mean_value_state_during_query: float = 0.0
+    write_gate_at_store: float = 0.0
+    write_gate_at_distractor: float = 0.0
+    write_gate_at_query: float = 0.0
+    store_vs_distractor_write_gap: float = 0.0
+    mean_match_signal: float = 0.0
+    value_state_at_query: float = 0.0
+    key_state_at_query: float = 0.0
 
 
 @dataclass(frozen=True)

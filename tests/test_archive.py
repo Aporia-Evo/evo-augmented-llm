@@ -156,18 +156,18 @@ def test_archive_descriptor_binning_is_deterministic_for_kv_retrieval_mechanism(
     first = build_archive_descriptor(
         final_max_score=3.9,
         score_ceiling=4.0,
-        query_key_alignment=0.75,
+        store_vs_distractor_write_gap=0.4,
         qd_profile=QD_PROFILE_KV_RETRIEVAL_MECHANISM,
     )
     second = build_archive_descriptor(
         final_max_score=3.9,
         score_ceiling=4.0,
-        query_key_alignment=0.75,
+        store_vs_distractor_write_gap=0.4,
         qd_profile=QD_PROFILE_KV_RETRIEVAL_MECHANISM,
     )
     assert first == second
     assert first.qd_profile == QD_PROFILE_KV_RETRIEVAL_MECHANISM
-    assert "alignbin_" in first.descriptor_key
+    assert "writegapbin_" in first.descriptor_key
 
 
 def test_general_compactness_builds_for_all_variants() -> None:

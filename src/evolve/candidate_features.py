@@ -11,7 +11,7 @@ from evolve.genome_codec import GenomeModel
 from utils.serialization import stable_json_dumps
 
 
-FEATURE_VERSION = "candidate-features-v8"
+FEATURE_VERSION = "candidate-features-v9"
 BOUND_TOLERANCE = 1e-6
 
 
@@ -182,6 +182,13 @@ def extract_candidate_features(
         mean_value_state_during_store=_coerce_float(metrics.get("mean_value_state_during_store")),
         mean_key_state_during_query=_coerce_float(metrics.get("mean_key_state_during_query")),
         mean_value_state_during_query=_coerce_float(metrics.get("mean_value_state_during_query")),
+        write_gate_at_store=_coerce_float(metrics.get("write_gate_at_store")),
+        write_gate_at_distractor=_coerce_float(metrics.get("write_gate_at_distractor")),
+        write_gate_at_query=_coerce_float(metrics.get("write_gate_at_query")),
+        store_vs_distractor_write_gap=_coerce_float(metrics.get("store_vs_distractor_write_gap")),
+        mean_match_signal=_coerce_float(metrics.get("mean_match_signal", metrics.get("match_mean"))),
+        value_state_at_query=_coerce_float(metrics.get("value_state_at_query")),
+        key_state_at_query=_coerce_float(metrics.get("key_state_at_query")),
     )
     vector = _feature_vector_from_record(feature)
     return feature, vector
@@ -276,6 +283,13 @@ def _feature_vector_from_record(record: CandidateFeatureRecord) -> CandidateFeat
         record.mean_value_state_during_store,
         record.mean_key_state_during_query,
         record.mean_value_state_during_query,
+        record.write_gate_at_store,
+        record.write_gate_at_distractor,
+        record.write_gate_at_query,
+        record.store_vs_distractor_write_gap,
+        record.mean_match_signal,
+        record.value_state_at_query,
+        record.key_state_at_query,
     ]
     array = np.asarray(vector, dtype=np.float64)
     norm_l2 = float(np.linalg.norm(array))

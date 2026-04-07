@@ -222,6 +222,8 @@ def test_stateful_v3_kv_separates_key_and_value_state() -> None:
                 slow_output_gain=0.3,
                 content_w_key=1.0,
                 content_b_key=0.0,
+                content_w_query=2.0,
+                content_b_query=2.0,
                 content_temperature=1.2,
                 content_b_match=0.0,
                 is_output=True,
@@ -233,11 +235,15 @@ def test_stateful_v3_kv_separates_key_and_value_state() -> None:
         ),
     )
     executor = StatefulV3KVNetworkExecutor(activation_steps=1)
-    executor.run_sequence(genome, [[1.0, 0.0], [1.0, 1.0]], step_roles=["store", "query"])
+    executor.run_sequence(genome, [[1.0, 0.0], [0.0, 0.0], [1.0, 1.0]], step_roles=["store", "distractor", "query"])
     metrics = executor.last_episode_metrics()
     assert metrics.mean_key_state > 0.0
     assert metrics.mean_value_state > 0.0
     assert metrics.key_value_separation >= 0.0
+    assert metrics.write_gate_at_store > metrics.write_gate_at_distractor
+    assert metrics.store_vs_distractor_write_gap > 0.0
+    assert metrics.match_at_query > 0.0
+    assert metrics.query_value_read_strength > 0.0
 
 
 def _single_connection_genome(

@@ -112,6 +112,13 @@ class PlasticityEpisodeMetrics:
     mean_value_state_during_store: float = 0.0
     mean_key_state_during_query: float = 0.0
     mean_value_state_during_query: float = 0.0
+    write_gate_at_store: float = 0.0
+    write_gate_at_distractor: float = 0.0
+    write_gate_at_query: float = 0.0
+    store_vs_distractor_write_gap: float = 0.0
+    mean_match_signal: float = 0.0
+    value_state_at_query: float = 0.0
+    key_state_at_query: float = 0.0
 
 
 def _incoming_connections_by_target(genome: GenomeModel) -> dict[int, list[ConnectionGeneModel]]:
@@ -572,15 +579,23 @@ class StatefulV3KVNetworkExecutor(StatefulNetworkExecutor):
         query_read_vals: list[float] = []
         store_coupling_vals: list[float] = []
         distractor_write_vals: list[float] = []
+        write_gate_store_vals: list[float] = []
+        write_gate_query_vals: list[float] = []
         readout_query_vals: list[float] = []
         readout_distractor_vals: list[float] = []
+        match_vals: list[float] = []
+        match_query_vals: list[float] = []
+        key_state_query_vals: list[float] = []
+        value_state_query_vals: list[float] = []
         role_totals: dict[str, tuple[float, float, int]] = {}
 
         for step_index, inputs in enumerate(input_sequence):
             step_role = _step_role_at(step_roles, step_index)
             input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
             outputs.update(input_map)
+            store_signal = float(inputs[0]) if len(inputs) > 0 else 0.0
             query_signal = float(inputs[1]) if len(inputs) > 1 else 0.0
+            distractor_signal = float(inputs[2]) if len(inputs) > 2 else 0.0
             for _ in range(self.activation_steps):
                 previous_outputs = dict(outputs)
                 next_outputs = dict(input_map)
@@ -591,12 +606,30 @@ class StatefulV3KVNetworkExecutor(StatefulNetworkExecutor):
                     for conn in incoming_by_target.get(node.node_id, ()):
                         summed_input += conn.weight * previous_outputs.get(conn.in_id, 0.0)
                     input_norm = summed_input / (1.0 + abs(summed_input))
-                    write_gate = 1.0 / (1.0 + math.exp(-((node.content_w_key * input_norm) + node.content_b_key)))
+                    write_gate = 1.0 / (
+                        1.0
+                        + math.exp(
+                            -(
+                                (node.content_w_key * input_norm)
+                                + (node.content_w_query * store_signal)
+                                - (node.content_b_query * distractor_signal)
+                                + node.content_b_key
+                            )
+                        )
+                    )
                     key_input = summed_input + node.bias
                     value_input = summed_input + node.slow_output_gain
                     new_key = (clamp_alpha(node.alpha) * key_state[node.node_id]) + (write_gate * key_input)
                     new_value = (clamp_alpha(node.alpha_slow) * value_state[node.node_id]) + (write_gate * value_input)
-                    match_t = 1.0 / (1.0 + math.exp(-((node.content_temperature * query_signal * new_key) + node.content_b_match)))
+                    match_t = 1.0 / (
+                        1.0
+                        + math.exp(
+                            -(
+                                (node.content_temperature * query_signal * (new_key / (1.0 + abs(new_key))))
+                                + node.content_b_match
+                            )
+                        )
+                    )
                     readout_t = match_t * new_value
                     next_outputs[node.node_id] = math.tanh(summed_input + readout_t)
                     key_state[node.node_id] = new_key
@@ -608,12 +641,18 @@ class StatefulV3KVNetworkExecutor(StatefulNetworkExecutor):
                     if step_role in {"store", "query", "distractor"}:
                         key_total, value_total, count = role_totals.get(step_role, (0.0, 0.0, 0))
                         role_totals[step_role] = (key_total + abs(new_key), value_total + abs(new_value), count + 1)
+                    match_vals.append(match_t)
                     if step_role == "query":
                         query_alignment_vals.append(abs(query_signal * new_key))
                         query_read_vals.append(abs(readout_t))
                         readout_query_vals.append(abs(readout_t))
+                        match_query_vals.append(match_t)
+                        write_gate_query_vals.append(write_gate)
+                        key_state_query_vals.append(abs(new_key))
+                        value_state_query_vals.append(abs(new_value))
                     if step_role == "store":
                         store_coupling_vals.append(abs(new_key * new_value))
+                        write_gate_store_vals.append(write_gate)
                     if step_role == "distractor":
                         distractor_write_vals.append(write_gate)
                         readout_distractor_vals.append(abs(readout_t))
@@ -644,6 +683,18 @@ class StatefulV3KVNetworkExecutor(StatefulNetworkExecutor):
             mean_value_state_during_store=_role_mean(role_totals, "store", index=1),
             mean_key_state_during_query=_role_mean(role_totals, "query", index=0),
             mean_value_state_during_query=_role_mean(role_totals, "query", index=1),
+            write_gate_at_store=float(np.mean(write_gate_store_vals)) if write_gate_store_vals else 0.0,
+            write_gate_at_distractor=float(np.mean(distractor_write_vals)) if distractor_write_vals else 0.0,
+            write_gate_at_query=float(np.mean(write_gate_query_vals)) if write_gate_query_vals else 0.0,
+            store_vs_distractor_write_gap=(
+                float(np.mean(write_gate_store_vals)) - float(np.mean(distractor_write_vals))
+                if write_gate_store_vals and distractor_write_vals
+                else 0.0
+            ),
+            mean_match_signal=float(np.mean(match_vals)) if match_vals else 0.0,
+            value_state_at_query=float(np.mean(value_state_query_vals)) if value_state_query_vals else 0.0,
+            key_state_at_query=float(np.mean(key_state_query_vals)) if key_state_query_vals else 0.0,
+            match_at_query=float(np.mean(match_query_vals)) if match_query_vals else 0.0,
         )
         return np.vstack(sequence_outputs)
 
