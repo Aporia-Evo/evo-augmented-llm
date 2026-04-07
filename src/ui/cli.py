@@ -60,6 +60,9 @@ TASK_CHOICES = ["xor", "delayed_xor", "bit_memory", "key_value_memory", "event_m
 VARIANT_CHOICES = [
     "stateful",
     "stateful_v2",
+    "stateful_v2_gated",
+    "stateful_v3_kv",
+    "content_gated",
     "stateless",
     "stateful_plastic",
     "stateful_plastic_hebb",
@@ -470,7 +473,7 @@ def build_parser() -> argparse.ArgumentParser:
     curriculum_compare_parser.add_argument("--task", choices=TASK_CHOICES, default="bit_memory")
     curriculum_compare_parser.add_argument(
         "--variants",
-        default="stateful,stateful_v2,stateful_plastic_hebb",
+        default="stateful,stateful_v2,stateful_v2_gated,stateful_v3_kv,content_gated,stateful_plastic_hebb",
         help="Comma-separated variants to include in the comparison report.",
     )
     curriculum_compare_parser.add_argument(

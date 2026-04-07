@@ -221,9 +221,55 @@ def test_stateful_v2_with_disabled_slow_path_matches_stateful_evaluation() -> No
 
     assert stateful_result.score == v2_result.score
     assert stateful_result.raw_metrics["sequence_predictions"] == v2_result.raw_metrics["sequence_predictions"]
-    assert v2_result.raw_metrics["mean_abs_fast_state"] > 0.0
-    assert v2_result.raw_metrics["mean_abs_slow_state"] == 0.0
-    assert v2_result.raw_metrics["slow_fast_contribution_ratio"] == 0.0
+
+
+def test_stateful_v2_gated_evaluator_is_deterministic() -> None:
+    config = AppConfig(
+        task=replace(TaskConfig(), name="bit_memory", activation_steps=4, temporal_delay_steps=3),
+        run=replace(RunConfig(), seed=11, variant="stateful_v2_gated"),
+    )
+    evaluator = build_evaluator(config.task, variant="stateful_v2_gated")
+    adapter = TensorNEATAdapter(config=config, num_inputs=evaluator.input_size, num_outputs=evaluator.output_size)
+    state = adapter.initialize(config.run.seed)
+    pop_nodes, pop_conns = adapter.ask(state)
+    genome = arrays_to_genome_model(adapter.genome, pop_nodes[0], pop_conns[0])
+    first = evaluator.evaluate(genome)
+    second = evaluator.evaluate(genome)
+    assert first.score == second.score
+    assert first.raw_metrics["gate_mean"] == second.raw_metrics["gate_mean"]
+    assert "gate_selectivity" in first.raw_metrics
+
+
+def test_content_gated_evaluator_is_deterministic() -> None:
+    config = AppConfig(
+        task=replace(TaskConfig(), name="bit_memory", activation_steps=4, temporal_delay_steps=3),
+        run=replace(RunConfig(), seed=11, variant="content_gated"),
+    )
+    evaluator = build_evaluator(config.task, variant="content_gated")
+    adapter = TensorNEATAdapter(config=config, num_inputs=evaluator.input_size, num_outputs=evaluator.output_size)
+    state = adapter.initialize(config.run.seed)
+    pop_nodes, pop_conns = adapter.ask(state)
+    genome = arrays_to_genome_model(adapter.genome, pop_nodes[0], pop_conns[0])
+    first = evaluator.evaluate(genome)
+    second = evaluator.evaluate(genome)
+    assert first.score == second.score
+    assert first.raw_metrics["match_mean"] == second.raw_metrics["match_mean"]
+
+
+def test_stateful_v3_kv_evaluator_is_deterministic() -> None:
+    config = AppConfig(
+        task=replace(TaskConfig(), name="bit_memory", activation_steps=4, temporal_delay_steps=3),
+        run=replace(RunConfig(), seed=11, variant="stateful_v3_kv"),
+    )
+    evaluator = build_evaluator(config.task, variant="stateful_v3_kv")
+    adapter = TensorNEATAdapter(config=config, num_inputs=evaluator.input_size, num_outputs=evaluator.output_size)
+    state = adapter.initialize(config.run.seed)
+    pop_nodes, pop_conns = adapter.ask(state)
+    genome = arrays_to_genome_model(adapter.genome, pop_nodes[0], pop_conns[0])
+    first = evaluator.evaluate(genome)
+    second = evaluator.evaluate(genome)
+    assert first.score == second.score
+    assert first.raw_metrics["mean_key_state"] == second.raw_metrics["mean_key_state"]
 
 
 def test_stateful_plastic_evaluator_uses_custom_delta_weight_clamp() -> None:

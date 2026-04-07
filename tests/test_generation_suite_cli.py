@@ -359,6 +359,9 @@ def test_benchmark_suite_key_value_memory_supports_profile_overrides(tmp_path: P
         "curriculum_progress",
         "retrieval_strategy",
         "retrieval_mechanism",
+        "gating_mechanism",
+        "content_retrieval",
+        "kv_retrieval_mechanism",
     }
     markdown = (tmp_path / "kv-suite.md").read_text(encoding="utf-8")
     assert "## Retrieval Diagnostics" in markdown

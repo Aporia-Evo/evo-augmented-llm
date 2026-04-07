@@ -12,6 +12,9 @@ import sympy as sp
 
 from config import AppConfig
 from evolve.plasticity import (
+    is_content_gated_variant,
+    is_stateful_v2_gated_variant,
+    is_stateful_v3_kv_variant,
     is_stateful_v2_variant,
     plastic_d_bounds_for_variant,
     plastic_d_init_for_variant,
@@ -66,6 +69,23 @@ class AlphaNode(BaseNode):
         slow_output_gain_lower_bound: float,
         slow_output_gain_upper_bound: float,
         enable_two_timescale: bool = False,
+        enable_selective_gating: bool = False,
+        gate_w_init_min: float = -1.0,
+        gate_w_init_max: float = 1.0,
+        gate_w_mutate_power: float = 0.3,
+        gate_b_init_min: float = -0.5,
+        gate_b_init_max: float = 0.5,
+        gate_b_mutate_power: float = 0.2,
+        gate_alpha_slow_init_min: float = 0.8,
+        gate_alpha_slow_init_max: float = 0.99,
+        gate_alpha_slow_mutate_power: float = 0.05,
+        gate_bias_fast_init_min: float = -0.5,
+        gate_bias_fast_init_max: float = 0.5,
+        gate_bias_fast_mutate_power: float = 0.2,
+        gate_bias_slow_init_min: float = -0.5,
+        gate_bias_slow_init_max: float = 0.5,
+        gate_bias_slow_mutate_power: float = 0.2,
+        gate_mutate_rate: float = 0.6,
         force_alpha_zero: bool = False,
     ) -> None:
         super().__init__()
@@ -100,12 +120,37 @@ class AlphaNode(BaseNode):
         self.slow_output_gain_lower_bound = slow_output_gain_lower_bound
         self.slow_output_gain_upper_bound = slow_output_gain_upper_bound
         self.enable_two_timescale = enable_two_timescale
+        self.enable_selective_gating = enable_selective_gating
+        self.gate_w_init_min = gate_w_init_min
+        self.gate_w_init_max = gate_w_init_max
+        self.gate_w_mutate_power = gate_w_mutate_power
+        self.gate_b_init_min = gate_b_init_min
+        self.gate_b_init_max = gate_b_init_max
+        self.gate_b_mutate_power = gate_b_mutate_power
+        self.gate_alpha_slow_init_min = gate_alpha_slow_init_min
+        self.gate_alpha_slow_init_max = gate_alpha_slow_init_max
+        self.gate_alpha_slow_mutate_power = gate_alpha_slow_mutate_power
+        self.gate_bias_fast_init_min = gate_bias_fast_init_min
+        self.gate_bias_fast_init_max = gate_bias_fast_init_max
+        self.gate_bias_fast_mutate_power = gate_bias_fast_mutate_power
+        self.gate_bias_slow_init_min = gate_bias_slow_init_min
+        self.gate_bias_slow_init_max = gate_bias_slow_init_max
+        self.gate_bias_slow_mutate_power = gate_bias_slow_mutate_power
+        self.gate_mutate_rate = gate_mutate_rate
         self.force_alpha_zero = force_alpha_zero
 
     def new_identity_attrs(self, state: State) -> jnp.ndarray:
         return jnp.array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=jnp.float32)
 
     def new_random_attrs(self, state: State, randkey: jax.Array) -> jnp.ndarray:
+        if self.enable_selective_gating:
+            k1, k2, k3, k4, k5 = jax.random.split(randkey, 5)
+            bias_fast = jax.random.uniform(k1, (), minval=self.gate_bias_fast_init_min, maxval=self.gate_bias_fast_init_max)
+            w_gate = jax.random.uniform(k2, (), minval=self.gate_w_init_min, maxval=self.gate_w_init_max)
+            alpha_slow = jax.random.uniform(k3, (), minval=self.gate_alpha_slow_init_min, maxval=self.gate_alpha_slow_init_max)
+            b_gate = jax.random.uniform(k4, (), minval=self.gate_b_init_min, maxval=self.gate_b_init_max)
+            bias_slow = jax.random.uniform(k5, (), minval=self.gate_bias_slow_init_min, maxval=self.gate_bias_slow_init_max)
+            return jnp.array([bias_fast, w_gate, alpha_slow, b_gate, bias_slow], dtype=jnp.float32)
         k1, k2, k3, k4, k5 = jax.random.split(randkey, 5)
         bias = jax.random.normal(k1, ()) * self.bias_init_std
         bias = jnp.clip(bias, self.bias_lower_bound, self.bias_upper_bound)
@@ -145,6 +190,31 @@ class AlphaNode(BaseNode):
         )
 
     def mutate(self, state: State, randkey: jax.Array, attrs: jnp.ndarray) -> jnp.ndarray:
+        if self.enable_selective_gating:
+            k1, k2, k3, k4, k5 = jax.random.split(randkey, 5)
+            bias_fast, w_gate, alpha_slow, b_gate, bias_slow = attrs
+            mutate_mask = jax.random.uniform(k1, (5,)) < self.gate_mutate_rate
+            deltas = jnp.array(
+                [
+                    jax.random.normal(k1, ()) * self.gate_bias_fast_mutate_power,
+                    jax.random.normal(k2, ()) * self.gate_w_mutate_power,
+                    jax.random.normal(k3, ()) * self.gate_alpha_slow_mutate_power,
+                    jax.random.normal(k4, ()) * self.gate_b_mutate_power,
+                    jax.random.normal(k5, ()) * self.gate_bias_slow_mutate_power,
+                ],
+                dtype=jnp.float32,
+            )
+            updated = jnp.where(mutate_mask, jnp.array([bias_fast, w_gate, alpha_slow, b_gate, bias_slow]) + deltas, jnp.array([bias_fast, w_gate, alpha_slow, b_gate, bias_slow]))
+            return jnp.array(
+                [
+                    jnp.clip(updated[0], self.gate_bias_fast_init_min, self.gate_bias_fast_init_max),
+                    jnp.clip(updated[1], self.gate_w_init_min, self.gate_w_init_max),
+                    jnp.clip(updated[2], self.gate_alpha_slow_init_min, self.gate_alpha_slow_init_max),
+                    jnp.clip(updated[3], self.gate_b_init_min, self.gate_b_init_max),
+                    jnp.clip(updated[4], self.gate_bias_slow_init_min, self.gate_bias_slow_init_max),
+                ],
+                dtype=jnp.float32,
+            )
         k1, k2, k3, k4, k5 = jax.random.split(randkey, 5)
         bias, alpha, alpha_slow, slow_input_gain, slow_output_gain = attrs
         bias = mutate_float(
@@ -267,6 +337,88 @@ class AlphaNode(BaseNode):
         bias = sp.symbols(f"n_{node_dict['idx']}_b")
         alpha = sp.symbols(f"n_{node_dict['idx']}_a")
         return sp.tanh(bias + alpha), {bias: node_dict["bias"], alpha: node_dict["alpha"]}
+
+
+class ContentGatedNode(BaseNode):
+    custom_attrs = [
+        "bias",
+        "alpha",
+        "alpha_slow",
+        "slow_input_gain",
+        "slow_output_gain",
+        "content_w_key",
+        "content_b_key",
+        "content_w_query",
+        "content_b_query",
+        "content_temperature",
+        "content_b_match",
+    ]
+
+    def __init__(self, *, mutation_cfg: Any) -> None:
+        super().__init__()
+        self.cfg = mutation_cfg
+
+    def new_identity_attrs(self, state: State) -> jnp.ndarray:
+        return jnp.array([0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0], dtype=jnp.float32)
+
+    def new_random_attrs(self, state: State, randkey: jax.Array) -> jnp.ndarray:
+        k = jax.random.split(randkey, 10)
+        return jnp.array(
+            [
+                jax.random.uniform(k[0], (), minval=self.cfg.bias_lower_bound, maxval=self.cfg.bias_upper_bound),
+                jax.random.uniform(k[1], (), minval=0.0, maxval=1.0),
+                jax.random.uniform(k[2], (), minval=0.0, maxval=1.0),
+                0.0,
+                jax.random.uniform(k[3], (), minval=-0.5, maxval=0.5),
+                jax.random.uniform(k[4], (), minval=self.cfg.content_w_key_init_min, maxval=self.cfg.content_w_key_init_max),
+                jax.random.uniform(k[5], (), minval=self.cfg.content_b_key_init_min, maxval=self.cfg.content_b_key_init_max),
+                jax.random.uniform(k[6], (), minval=self.cfg.content_w_query_init_min, maxval=self.cfg.content_w_query_init_max),
+                jax.random.uniform(k[7], (), minval=self.cfg.content_b_query_init_min, maxval=self.cfg.content_b_query_init_max),
+                jax.random.uniform(k[8], (), minval=self.cfg.content_temperature_init_min, maxval=self.cfg.content_temperature_init_max),
+                jax.random.uniform(k[9], (), minval=self.cfg.content_b_match_init_min, maxval=self.cfg.content_b_match_init_max),
+            ],
+            dtype=jnp.float32,
+        )
+
+    def mutate(self, state: State, randkey: jax.Array, attrs: jnp.ndarray) -> jnp.ndarray:
+        k = jax.random.split(randkey, 11)
+        mutate_mask = jax.random.uniform(k[0], (10,)) < self.cfg.content_mutate_rate
+        deltas = jnp.array(
+            [
+                jax.random.normal(k[1], ()) * self.cfg.bias_mutate_power,
+                jax.random.normal(k[2], ()) * self.cfg.alpha_mutate_power,
+                jax.random.normal(k[3], ()) * self.cfg.alpha_mutate_power,
+                jax.random.normal(k[4], ()) * self.cfg.bias_mutate_power,
+                jax.random.normal(k[5], ()) * self.cfg.content_w_key_mutate_power,
+                jax.random.normal(k[6], ()) * self.cfg.content_b_key_mutate_power,
+                jax.random.normal(k[7], ()) * self.cfg.content_w_query_mutate_power,
+                jax.random.normal(k[8], ()) * self.cfg.content_b_query_mutate_power,
+                jax.random.normal(k[9], ()) * self.cfg.content_temperature_mutate_power,
+                jax.random.normal(k[10], ()) * self.cfg.content_b_match_mutate_power,
+            ],
+            dtype=jnp.float32,
+        )
+        mutable = jnp.array([attrs[0], attrs[1], attrs[2], attrs[4], attrs[5], attrs[6], attrs[7], attrs[8], attrs[9], attrs[10]])
+        updated = jnp.where(mutate_mask, mutable + deltas, mutable)
+        return jnp.array(
+            [
+                jnp.clip(updated[0], self.cfg.bias_lower_bound, self.cfg.bias_upper_bound),
+                jnp.clip(updated[1], 0.0, 1.0),
+                jnp.clip(updated[2], 0.0, 1.0),
+                0.0,
+                jnp.clip(updated[3], -1.0, 1.0),
+                jnp.clip(updated[4], self.cfg.content_w_key_init_min, self.cfg.content_w_key_init_max),
+                jnp.clip(updated[5], self.cfg.content_b_key_init_min, self.cfg.content_b_key_init_max),
+                jnp.clip(updated[6], self.cfg.content_w_query_init_min, self.cfg.content_w_query_init_max),
+                jnp.clip(updated[7], self.cfg.content_b_query_init_min, self.cfg.content_b_query_init_max),
+                jnp.clip(updated[8], self.cfg.content_temperature_init_min, self.cfg.content_temperature_init_max),
+                jnp.clip(updated[9], self.cfg.content_b_match_init_min, self.cfg.content_b_match_init_max),
+            ],
+            dtype=jnp.float32,
+        )
+
+    def distance(self, state: State, attrs1: jnp.ndarray, attrs2: jnp.ndarray) -> jnp.ndarray:
+        return jnp.sum(jnp.abs(attrs1 - attrs2))
 
 
 class EnabledOriginConn(OriginConn):
@@ -510,6 +662,8 @@ class TensorNEATAdapter:
         evolution_cfg = config.evolution
         force_alpha_zero = config.run.variant == "stateless"
         enable_two_timescale = is_stateful_v2_variant(config.run.variant)
+        enable_selective_gating = is_stateful_v2_gated_variant(config.run.variant)
+        enable_content_gating = is_content_gated_variant(config.run.variant) or is_stateful_v3_kv_variant(config.run.variant)
         plastic_mode = plastic_mode_for_variant(config.run.variant)
         fixed_plastic_d = plastic_fixed_d_for_variant(config.run.variant)
         plastic_d_lower_bound, plastic_d_upper_bound = plastic_d_bounds_for_variant(
@@ -529,40 +683,60 @@ class TensorNEATAdapter:
             default_replace_rate=mutation_cfg.plastic_d_replace_rate,
         )
 
-        node_gene = AlphaNode(
-            bias_init_std=mutation_cfg.bias_init_std,
-            bias_mutate_power=mutation_cfg.bias_mutate_power,
-            bias_mutate_rate=mutation_cfg.bias_mutate_rate,
-            bias_replace_rate=mutation_cfg.bias_replace_rate,
-            bias_lower_bound=mutation_cfg.bias_lower_bound,
-            bias_upper_bound=mutation_cfg.bias_upper_bound,
-            alpha_init_mean=mutation_cfg.alpha_init_mean,
-            alpha_init_std=mutation_cfg.alpha_init_std,
-            alpha_mutate_power=mutation_cfg.alpha_mutate_power,
-            alpha_mutate_rate=mutation_cfg.alpha_mutate_rate,
-            alpha_replace_rate=mutation_cfg.alpha_replace_rate,
-            alpha_slow_init_mean=mutation_cfg.alpha_slow_init_mean,
-            alpha_slow_init_std=mutation_cfg.alpha_slow_init_std,
-            alpha_slow_mutate_power=mutation_cfg.alpha_slow_mutate_power,
-            alpha_slow_mutate_rate=mutation_cfg.alpha_slow_mutate_rate,
-            alpha_slow_replace_rate=mutation_cfg.alpha_slow_replace_rate,
-            slow_input_gain_init_mean=mutation_cfg.slow_input_gain_init_mean,
-            slow_input_gain_init_std=mutation_cfg.slow_input_gain_init_std,
-            slow_input_gain_mutate_power=mutation_cfg.slow_input_gain_mutate_power,
-            slow_input_gain_mutate_rate=mutation_cfg.slow_input_gain_mutate_rate,
-            slow_input_gain_replace_rate=mutation_cfg.slow_input_gain_replace_rate,
-            slow_input_gain_lower_bound=mutation_cfg.slow_input_gain_lower_bound,
-            slow_input_gain_upper_bound=mutation_cfg.slow_input_gain_upper_bound,
-            slow_output_gain_init_mean=mutation_cfg.slow_output_gain_init_mean,
-            slow_output_gain_init_std=mutation_cfg.slow_output_gain_init_std,
-            slow_output_gain_mutate_power=mutation_cfg.slow_output_gain_mutate_power,
-            slow_output_gain_mutate_rate=mutation_cfg.slow_output_gain_mutate_rate,
-            slow_output_gain_replace_rate=mutation_cfg.slow_output_gain_replace_rate,
-            slow_output_gain_lower_bound=mutation_cfg.slow_output_gain_lower_bound,
-            slow_output_gain_upper_bound=mutation_cfg.slow_output_gain_upper_bound,
-            enable_two_timescale=enable_two_timescale,
-            force_alpha_zero=force_alpha_zero,
-        )
+        if enable_content_gating:
+            node_gene = ContentGatedNode(mutation_cfg=mutation_cfg)
+        else:
+            node_gene = AlphaNode(
+                bias_init_std=mutation_cfg.bias_init_std,
+                bias_mutate_power=mutation_cfg.bias_mutate_power,
+                bias_mutate_rate=mutation_cfg.bias_mutate_rate,
+                bias_replace_rate=mutation_cfg.bias_replace_rate,
+                bias_lower_bound=mutation_cfg.bias_lower_bound,
+                bias_upper_bound=mutation_cfg.bias_upper_bound,
+                alpha_init_mean=mutation_cfg.alpha_init_mean,
+                alpha_init_std=mutation_cfg.alpha_init_std,
+                alpha_mutate_power=mutation_cfg.alpha_mutate_power,
+                alpha_mutate_rate=mutation_cfg.alpha_mutate_rate,
+                alpha_replace_rate=mutation_cfg.alpha_replace_rate,
+                alpha_slow_init_mean=mutation_cfg.alpha_slow_init_mean,
+                alpha_slow_init_std=mutation_cfg.alpha_slow_init_std,
+                alpha_slow_mutate_power=mutation_cfg.alpha_slow_mutate_power,
+                alpha_slow_mutate_rate=mutation_cfg.alpha_slow_mutate_rate,
+                alpha_slow_replace_rate=mutation_cfg.alpha_slow_replace_rate,
+                slow_input_gain_init_mean=mutation_cfg.slow_input_gain_init_mean,
+                slow_input_gain_init_std=mutation_cfg.slow_input_gain_init_std,
+                slow_input_gain_mutate_power=mutation_cfg.slow_input_gain_mutate_power,
+                slow_input_gain_mutate_rate=mutation_cfg.slow_input_gain_mutate_rate,
+                slow_input_gain_replace_rate=mutation_cfg.slow_input_gain_replace_rate,
+                slow_input_gain_lower_bound=mutation_cfg.slow_input_gain_lower_bound,
+                slow_input_gain_upper_bound=mutation_cfg.slow_input_gain_upper_bound,
+                slow_output_gain_init_mean=mutation_cfg.slow_output_gain_init_mean,
+                slow_output_gain_init_std=mutation_cfg.slow_output_gain_init_std,
+                slow_output_gain_mutate_power=mutation_cfg.slow_output_gain_mutate_power,
+                slow_output_gain_mutate_rate=mutation_cfg.slow_output_gain_mutate_rate,
+                slow_output_gain_replace_rate=mutation_cfg.slow_output_gain_replace_rate,
+                slow_output_gain_lower_bound=mutation_cfg.slow_output_gain_lower_bound,
+                slow_output_gain_upper_bound=mutation_cfg.slow_output_gain_upper_bound,
+                enable_two_timescale=enable_two_timescale,
+                enable_selective_gating=enable_selective_gating,
+                gate_w_init_min=mutation_cfg.w_gate_init_min,
+                gate_w_init_max=mutation_cfg.w_gate_init_max,
+                gate_w_mutate_power=mutation_cfg.w_gate_mutate_power,
+                gate_b_init_min=mutation_cfg.b_gate_init_min,
+                gate_b_init_max=mutation_cfg.b_gate_init_max,
+                gate_b_mutate_power=mutation_cfg.b_gate_mutate_power,
+                gate_alpha_slow_init_min=mutation_cfg.gated_alpha_slow_init_min,
+                gate_alpha_slow_init_max=mutation_cfg.gated_alpha_slow_init_max,
+                gate_alpha_slow_mutate_power=mutation_cfg.gated_alpha_slow_mutate_power,
+                gate_bias_fast_init_min=mutation_cfg.bias_fast_init_min,
+                gate_bias_fast_init_max=mutation_cfg.bias_fast_init_max,
+                gate_bias_fast_mutate_power=mutation_cfg.bias_fast_mutate_power,
+                gate_bias_slow_init_min=mutation_cfg.bias_slow_init_min,
+                gate_bias_slow_init_max=mutation_cfg.bias_slow_init_max,
+                gate_bias_slow_mutate_power=mutation_cfg.bias_slow_mutate_power,
+                gate_mutate_rate=mutation_cfg.gated_mutate_rate,
+                force_alpha_zero=force_alpha_zero,
+            )
         conn_gene = EnabledOriginConn(
             weight_init_std=mutation_cfg.weight_init_std,
             weight_mutate_power=mutation_cfg.weight_mutate_power,

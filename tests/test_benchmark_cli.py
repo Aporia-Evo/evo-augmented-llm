@@ -27,12 +27,15 @@ def test_parse_optional_delay_list_accepts_comma_separated_values() -> None:
 
 def test_parse_variants_accepts_stateful_stateless_and_plastic() -> None:
     assert _parse_variants(
-        "stateful, stateful_v2, stateless, stateful_plastic, stateful_plastic_hebb, stateful_plastic_ad, "
+        "stateful, stateful_v2, stateful_v2_gated, stateful_v3_kv, content_gated, stateless, stateful_plastic, stateful_plastic_hebb, stateful_plastic_ad, "
         "stateful_plastic_ad_narrow, stateful_plastic_ad_d0, stateful_plastic_ad_d005, "
         "stateful_plastic_ad_d01, stateful_plastic_ad_d02, stateful"
     ) == [
         "stateful",
         "stateful_v2",
+        "stateful_v2_gated",
+        "stateful_v3_kv",
+        "content_gated",
         "stateless",
         "stateful_plastic",
         "stateful_plastic_hebb",

@@ -75,6 +75,12 @@ def test_extract_candidate_features_handles_missing_metrics_for_old_variants() -
     assert feature.store_query_state_gap == 0.0
     assert feature.slow_fast_retrieval_ratio == 0.0
     assert feature.retrieval_state_alignment == 0.0
+    assert feature.gate_mean == 0.0
+    assert feature.gate_selectivity == 0.0
+    assert feature.match_mean == 0.0
+    assert feature.match_selectivity == 0.0
+    assert feature.mean_key_state == 0.0
+    assert feature.query_key_alignment == 0.0
     assert vector.norm_l2 >= 0.0
 
 
@@ -146,6 +152,38 @@ def test_extract_candidate_features_captures_retrieval_metrics() -> None:
         "mean_abs_slow_state_during_query": 1.5,
         "mean_abs_fast_state_during_distractor": 0.2,
         "mean_abs_slow_state_during_distractor": 0.3,
+        "gate_mean": 0.55,
+        "gate_variance": 0.04,
+        "gate_at_store": 0.3,
+        "gate_at_distractor": 0.8,
+        "gate_at_query": 0.4,
+        "gate_selectivity": 0.5,
+        "gate_store_minus_query": -0.1,
+        "gate_query_minus_distractor": -0.4,
+        "gate_role_contrast": 0.9,
+        "slow_state_at_query": 1.5,
+        "fast_state_at_query": 0.5,
+        "match_mean": 0.6,
+        "match_variance": 0.03,
+        "match_at_store": 0.7,
+        "match_at_distractor": 0.3,
+        "match_at_query": 0.9,
+        "match_selectivity": 0.4,
+        "query_match_score": 0.9,
+        "state_query_alignment": 0.8,
+        "content_retention_gap": 0.2,
+        "mean_key_state": 1.1,
+        "mean_value_state": 0.9,
+        "key_value_separation": 0.2,
+        "query_key_alignment": 0.7,
+        "query_value_read_strength": 0.6,
+        "store_key_value_coupling": 0.5,
+        "distractor_write_leak": 0.2,
+        "readout_selectivity": 0.4,
+        "mean_key_state_during_store": 1.0,
+        "mean_value_state_during_store": 0.8,
+        "mean_key_state_during_query": 1.2,
+        "mean_value_state_during_query": 1.0,
     }
 
     feature, _vector = extract_candidate_features(genome, raw_metrics, context)
@@ -169,6 +207,12 @@ def test_extract_candidate_features_captures_retrieval_metrics() -> None:
     assert abs(feature.store_query_state_gap - 0.1) <= 1e-9
     assert feature.slow_fast_retrieval_ratio == 3.0
     assert feature.retrieval_state_alignment > 0.9
+    assert feature.gate_mean == 0.55
+    assert feature.gate_selectivity == 0.5
+    assert feature.match_mean == 0.6
+    assert feature.match_selectivity == 0.4
+    assert feature.mean_key_state == 1.1
+    assert feature.query_key_alignment == 0.7
 
 
 def test_in_memory_repository_stores_feature_values_and_hof_flag() -> None:

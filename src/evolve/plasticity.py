@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 STATEFUL_V2_VARIANTS = frozenset({"stateful_v2"})
+STATEFUL_V2_GATED_VARIANTS = frozenset({"stateful_v2_gated"})
+CONTENT_GATED_VARIANTS = frozenset({"content_gated"})
+STATEFUL_V3_KV_VARIANTS = frozenset({"stateful_v3_kv"})
 PLASTIC_HEBB_VARIANTS = frozenset({"stateful_plastic", "stateful_plastic_hebb"})
 PLASTIC_AD_FIXED_D_VARIANTS = {
     "stateful_plastic_ad_d0": 0.0,
@@ -23,6 +26,18 @@ def plastic_mode_for_variant(variant: str) -> str | None:
 
 def is_stateful_v2_variant(variant: str) -> bool:
     return variant in STATEFUL_V2_VARIANTS
+
+
+def is_stateful_v2_gated_variant(variant: str) -> bool:
+    return variant in STATEFUL_V2_GATED_VARIANTS
+
+
+def is_content_gated_variant(variant: str) -> bool:
+    return variant in CONTENT_GATED_VARIANTS
+
+
+def is_stateful_v3_kv_variant(variant: str) -> bool:
+    return variant in STATEFUL_V3_KV_VARIANTS
 
 
 def plastic_fixed_d_for_variant(variant: str) -> float | None:

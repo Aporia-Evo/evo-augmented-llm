@@ -87,6 +87,41 @@ mutation:
   slow_output_gain_init_std: 0.2
   slow_output_gain_lower_bound: -2.0
   slow_output_gain_upper_bound: 2.0
+  w_gate_init_min: -1.0
+  w_gate_init_max: 1.0
+  w_gate_mutate_power: 0.3
+  b_gate_init_min: -0.5
+  b_gate_init_max: 0.5
+  b_gate_mutate_power: 0.2
+  gated_alpha_slow_init_min: 0.8
+  gated_alpha_slow_init_max: 0.99
+  gated_alpha_slow_mutate_power: 0.05
+  bias_fast_init_min: -0.5
+  bias_fast_init_max: 0.5
+  bias_fast_mutate_power: 0.2
+  bias_slow_init_min: -0.5
+  bias_slow_init_max: 0.5
+  bias_slow_mutate_power: 0.2
+  gated_mutate_rate: 0.6
+  content_w_key_init_min: -1.0
+  content_w_key_init_max: 1.0
+  content_w_key_mutate_power: 0.2
+  content_b_key_init_min: -0.5
+  content_b_key_init_max: 0.5
+  content_b_key_mutate_power: 0.2
+  content_w_query_init_min: -1.0
+  content_w_query_init_max: 1.0
+  content_w_query_mutate_power: 0.2
+  content_b_query_init_min: -0.5
+  content_b_query_init_max: 0.5
+  content_b_query_mutate_power: 0.2
+  content_temperature_init_min: 0.5
+  content_temperature_init_max: 2.0
+  content_temperature_mutate_power: 0.1
+  content_b_match_init_min: -0.5
+  content_b_match_init_max: 0.5
+  content_b_match_mutate_power: 0.2
+  content_mutate_rate: 0.6
 
 plasticity:
   delta_w_clamp: 1.0
