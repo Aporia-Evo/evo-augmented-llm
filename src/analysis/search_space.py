@@ -338,6 +338,9 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
         if mean_query_key_alignment_v11 >= 0.5 and mean_query_value_read_strength <= 0.3:
             hints.append("Key/Value-Trennung ist messbar, aber noch nicht funktional ausreichend fuer robustes Value-Retrieval.")
 
+        if mean_query_value_read_strength >= 0.5 and mean_store_vs_distractor_write_gap <= 0.0:
+            hints.append("Staerkerer Readout ist sichtbar, destabilisiert aber den Schreibpfad; die Write-Separation kippt noch nicht robust ins Positive.")
+
         if mean_readout_selectivity >= 0.25:
             hints.append("Readout bleibt zwischen Query und Distraktor klar getrennt; der Abrufpfad wirkt selektiver.")
 

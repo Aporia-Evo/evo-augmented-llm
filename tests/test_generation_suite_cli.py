@@ -375,3 +375,32 @@ def test_benchmark_suite_key_value_memory_supports_profile_overrides(tmp_path: P
     ]
     assert feature_rows
     assert feature_rows[0]["task_name"] == "key_value_memory"
+
+
+def test_benchmark_suite_supports_v11c_kv_preset_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v3_kv",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v11c_kv_selective.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v11c-selective-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v11c-selective-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v3_kv" in markdown

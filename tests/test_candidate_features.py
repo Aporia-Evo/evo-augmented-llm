@@ -564,6 +564,59 @@ def test_analyze_search_space_reports_v11b_kv_hints(tmp_path: Path, capsys) -> N
     output = capsys.readouterr().out
     assert "Write-Gate bleibt zu undifferenziert" in output
     assert "Query-Match bleibt schwach" in output
+    assert "destabilisiert aber den Schreibpfad" not in output
+
+
+def test_analyze_search_space_reports_readout_vs_write_tradeoff_hint(tmp_path: Path, capsys) -> None:
+    record = CandidateFeatureRecord(
+        candidate_id="c-kv-tradeoff",
+        run_id="run-kv",
+        benchmark_label="bench-v11c",
+        task_name="key_value_memory",
+        delay_steps=5,
+        variant="stateful_v3_kv",
+        seed=7,
+        generation=2,
+        hof_flag=False,
+        success=False,
+        final_max_score=0.8,
+        first_success_generation=None,
+        mean_alpha=0.0,
+        std_alpha=0.0,
+        mean_eta=0.0,
+        std_eta=0.0,
+        mean_plastic_d=0.0,
+        std_plastic_d=0.0,
+        plastic_d_at_lower_bound_fraction=0.0,
+        plastic_d_at_zero_fraction=0.0,
+        node_count=3,
+        enabled_conn_count=2,
+        mean_abs_delta_w=0.0,
+        max_abs_delta_w=0.0,
+        clamp_hit_rate=0.0,
+        plasticity_active_fraction=0.0,
+        store_vs_distractor_write_gap=-0.05,
+        query_key_alignment=0.6,
+        query_value_read_strength=0.7,
+    )
+    feature_path = tmp_path / "bench-v11c.candidate-features.jsonl"
+    write_feature_records_jsonl(feature_path, [record])
+    exit_code = main(
+        [
+            "analyze-search-space",
+            "--store",
+            "memory",
+            "--benchmark-label",
+            "bench-v11c",
+            "--task",
+            "key_value_memory",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "destabilisiert aber den Schreibpfad" in output
 
 
 def _context(*, variant: str = "stateful_plastic_ad") -> CandidateFeatureContext:

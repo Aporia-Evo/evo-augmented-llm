@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from config import load_config
 from ui.cli import (
     CompareSummary,
     _parse_optional_delay_list,
@@ -163,3 +164,17 @@ def test_pair_delay_summaries_matches_stateful_and_stateless_rows() -> None:
             "delta_mean_final_max_score": 1.0,
         }
     ]
+
+
+def test_v11c_kv_preset_overlays_change_kv_parameters_only() -> None:
+    base = load_config(["configs/base.yaml"])
+    conservative = load_config(["configs/base.yaml", "configs/v11c_kv_conservative.yaml"])
+    selective = load_config(["configs/base.yaml", "configs/v11c_kv_selective.yaml"])
+    readout = load_config(["configs/base.yaml", "configs/v11c_kv_readout_boost.yaml"])
+
+    assert conservative.mutation.alpha_slow_init_mean > base.mutation.alpha_slow_init_mean
+    assert selective.mutation.content_b_query_init_max > base.mutation.content_b_query_init_max
+    assert readout.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
+    assert readout.mutation.content_b_match_init_max > base.mutation.content_b_match_init_max
+    # Unrelated global knob remains unchanged across overlays.
+    assert conservative.mutation.weight_mutate_power == base.mutation.weight_mutate_power
