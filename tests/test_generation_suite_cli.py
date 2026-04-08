@@ -611,3 +611,61 @@ def test_benchmark_suite_supports_v12d_slots_margin_plus_overlay(tmp_path: Path)
     assert exit_code == 0
     markdown = (tmp_path / "kv-v12d-margin-plus-smoke.md").read_text(encoding="utf-8")
     assert "stateful_v4_slots" in markdown
+
+
+def test_benchmark_suite_supports_v13b_addressed_asym_init_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v5_addressed_slots",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v13b_addressed_asym_init.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v13b-asym-init-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v13b-asym-init-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v5_addressed_slots" in markdown
+
+
+def test_benchmark_suite_supports_v13b_addressed_asym_rw_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v5_addressed_slots",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v13b_addressed_asym_rw.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v13b-asym-rw-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v13b-asym-rw-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v5_addressed_slots" in markdown

@@ -1,0 +1,17 @@
+mutation:
+  # V13b Preset A: conservative asymmetry through initialization ranges.
+  content_w_key_init_min: -0.85
+  content_w_key_init_max: 0.65
+  content_b_key_init_min: -0.35
+  content_b_key_init_max: 0.35
+  content_w_query_init_min: -0.55
+  content_w_query_init_max: 0.95
+  content_b_query_init_min: -0.25
+  content_b_query_init_max: 0.55
+  content_temperature_init_min: 0.9
+  content_temperature_init_max: 2.3
+  content_b_match_init_min: -0.25
+  content_b_match_init_max: 0.55
+  content_mutate_rate: 0.26
+  content_temperature_mutate_power: 0.08
+  content_b_match_mutate_power: 0.12

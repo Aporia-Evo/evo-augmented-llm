@@ -255,3 +255,25 @@ def test_v12d_slots_margin_plus_overlay_loads_and_is_targeted() -> None:
     assert margin_plus.mutation.content_mutate_rate < base.mutation.content_mutate_rate
     assert margin_plus.mutation.weight_mutate_power == base.mutation.weight_mutate_power
     assert margin_plus.run.variant == base.run.variant
+
+
+def test_v13b_addressed_asym_init_overlay_loads_and_is_targeted() -> None:
+    base = load_config(["configs/base.yaml"])
+    asym_init = load_config(["configs/base.yaml", "configs/v13b_addressed_asym_init.yaml"])
+
+    assert asym_init.mutation.content_b_match_init_max > base.mutation.content_b_match_init_max
+    assert asym_init.mutation.content_w_query_init_min > base.mutation.content_w_query_init_min
+    assert asym_init.mutation.content_temperature_mutate_power < base.mutation.content_temperature_mutate_power
+    assert asym_init.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+    assert asym_init.run.variant == base.run.variant
+
+
+def test_v13b_addressed_asym_rw_overlay_loads_and_is_targeted() -> None:
+    base = load_config(["configs/base.yaml"])
+    asym_rw = load_config(["configs/base.yaml", "configs/v13b_addressed_asym_rw.yaml"])
+
+    assert asym_rw.mutation.content_w_query_init_max > base.mutation.content_w_query_init_max
+    assert asym_rw.mutation.content_b_query_init_max > base.mutation.content_b_query_init_max
+    assert asym_rw.mutation.content_b_match_mutate_power < base.mutation.content_b_match_mutate_power
+    assert asym_rw.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+    assert asym_rw.run.variant == base.run.variant
