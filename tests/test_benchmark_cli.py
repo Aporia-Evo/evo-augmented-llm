@@ -178,3 +178,13 @@ def test_v11c_kv_preset_overlays_change_kv_parameters_only() -> None:
     assert readout.mutation.content_b_match_init_max > base.mutation.content_b_match_init_max
     # Unrelated global knob remains unchanged across overlays.
     assert conservative.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+
+
+def test_v11d_kv_conservative_plus_overlay_loads() -> None:
+    base = load_config(["configs/base.yaml"])
+    v11d = load_config(["configs/base.yaml", "configs/v11d_kv_conservative_plus.yaml"])
+
+    assert v11d.mutation.alpha_init_mean > base.mutation.alpha_init_mean
+    assert v11d.mutation.content_w_query_mutate_power < base.mutation.content_w_query_mutate_power
+    assert v11d.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
+    assert v11d.mutation.weight_mutate_power == base.mutation.weight_mutate_power
