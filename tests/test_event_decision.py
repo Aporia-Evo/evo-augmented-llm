@@ -19,7 +19,7 @@ def test_event_decision_task_target_tracks_relevant_event_not_irrelevant_one() -
     task = EventDecisionTask.create(delay_steps=1)
 
     found = False
-    for sequence, target in zip(task.input_sequences, task.target_sequences, strict=False):
+    for sequence, target in zip(task.input_sequences, task.target_sequences, strict=True):
         relevant_events = sequence[sequence[:, 1] == 1.0]
         irrelevant_events = sequence[sequence[:, 2] == 1.0]
         if relevant_events.shape[0] == 1 and irrelevant_events.shape[0] == 1:

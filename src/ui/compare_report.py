@@ -84,7 +84,7 @@ def build_online_compare_summary(
         time_to_first_success=time_to_first_success,
         replacements_until_first_success=replacements_until_first_success,
         hall_of_fame_size=hall_of_fame_size,
-        hall_of_fame_growth=hall_of_fame_size,
+        hall_of_fame_growth=_hall_of_fame_growth(repository, run, hall_of_fame_size),
         resumed_jobs=resumed_jobs,
     )
 
@@ -119,6 +119,27 @@ def build_online_benchmark_aggregates(summaries: list[OnlineCompareSummary]) -> 
             )
         )
     return rows
+
+
+def _hall_of_fame_growth(
+    repository: OnlineRunRepository,
+    run: RunRecord,
+    hall_of_fame_size: int,
+) -> int:
+    resume_events = [
+        event
+        for event in repository.list_events(run.run_id, limit=500)
+        if event.type == "run_resumed"
+    ]
+    if not resume_events:
+        return hall_of_fame_size
+    latest_resume = max(resume_events, key=lambda event: event.created_at)
+    hall_of_fame_entries = repository.list_hall_of_fame(run.run_id, limit=5000)
+    return sum(
+        1
+        for entry in hall_of_fame_entries
+        if entry.inserted_at >= latest_resume.created_at
+    )
 
 
 def _replacements_until_first_success(
