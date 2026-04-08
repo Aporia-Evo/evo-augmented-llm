@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from config import load_config
 from ui.cli import (
     CompareSummary,
     _parse_optional_delay_list,
@@ -27,12 +28,16 @@ def test_parse_optional_delay_list_accepts_comma_separated_values() -> None:
 
 def test_parse_variants_accepts_stateful_stateless_and_plastic() -> None:
     assert _parse_variants(
-        "stateful, stateful_v2, stateless, stateful_plastic, stateful_plastic_hebb, stateful_plastic_ad, "
+        "stateful, stateful_v2, stateful_v2_gated, stateful_v3_kv, stateful_v4_slots, content_gated, stateless, stateful_plastic, stateful_plastic_hebb, stateful_plastic_ad, "
         "stateful_plastic_ad_narrow, stateful_plastic_ad_d0, stateful_plastic_ad_d005, "
         "stateful_plastic_ad_d01, stateful_plastic_ad_d02, stateful"
     ) == [
         "stateful",
         "stateful_v2",
+        "stateful_v2_gated",
+        "stateful_v3_kv",
+        "stateful_v4_slots",
+        "content_gated",
         "stateless",
         "stateful_plastic",
         "stateful_plastic_hebb",
@@ -160,3 +165,27 @@ def test_pair_delay_summaries_matches_stateful_and_stateless_rows() -> None:
             "delta_mean_final_max_score": 1.0,
         }
     ]
+
+
+def test_v11c_kv_preset_overlays_change_kv_parameters_only() -> None:
+    base = load_config(["configs/base.yaml"])
+    conservative = load_config(["configs/base.yaml", "configs/v11c_kv_conservative.yaml"])
+    selective = load_config(["configs/base.yaml", "configs/v11c_kv_selective.yaml"])
+    readout = load_config(["configs/base.yaml", "configs/v11c_kv_readout_boost.yaml"])
+
+    assert conservative.mutation.alpha_slow_init_mean > base.mutation.alpha_slow_init_mean
+    assert selective.mutation.content_b_query_init_max > base.mutation.content_b_query_init_max
+    assert readout.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
+    assert readout.mutation.content_b_match_init_max > base.mutation.content_b_match_init_max
+    # Unrelated global knob remains unchanged across overlays.
+    assert conservative.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+
+
+def test_v11d_kv_conservative_plus_overlay_loads() -> None:
+    base = load_config(["configs/base.yaml"])
+    v11d = load_config(["configs/base.yaml", "configs/v11d_kv_conservative_plus.yaml"])
+
+    assert v11d.mutation.alpha_init_mean > base.mutation.alpha_init_mean
+    assert v11d.mutation.content_w_query_mutate_power < base.mutation.content_w_query_mutate_power
+    assert v11d.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
+    assert v11d.mutation.weight_mutate_power == base.mutation.weight_mutate_power

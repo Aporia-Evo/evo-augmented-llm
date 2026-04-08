@@ -17,6 +17,12 @@ class NodeGeneModel:
     alpha_slow: float = 0.0
     slow_input_gain: float = 0.0
     slow_output_gain: float = 0.0
+    content_w_key: float = 0.0
+    content_b_key: float = 0.0
+    content_w_query: float = 0.0
+    content_b_query: float = 0.0
+    content_temperature: float = 1.0
+    content_b_match: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -65,6 +71,12 @@ def arrays_to_genome_model(genome_template: Any, nodes: Any, conns: Any) -> Geno
                     alpha_slow=float(np.clip(row[3], 0.0, 1.0)) if row.shape[0] > 3 and not np.isnan(row[3]) else 0.0,
                     slow_input_gain=float(row[4]) if row.shape[0] > 4 and not np.isnan(row[4]) else 0.0,
                     slow_output_gain=float(row[5]) if row.shape[0] > 5 and not np.isnan(row[5]) else 0.0,
+                    content_w_key=float(row[6]) if row.shape[0] > 6 and not np.isnan(row[6]) else 0.0,
+                    content_b_key=float(row[7]) if row.shape[0] > 7 and not np.isnan(row[7]) else 0.0,
+                    content_w_query=float(row[8]) if row.shape[0] > 8 and not np.isnan(row[8]) else 0.0,
+                    content_b_query=float(row[9]) if row.shape[0] > 9 and not np.isnan(row[9]) else 0.0,
+                    content_temperature=float(row[10]) if row.shape[0] > 10 and not np.isnan(row[10]) else 1.0,
+                    content_b_match=float(row[11]) if row.shape[0] > 11 and not np.isnan(row[11]) else 0.0,
                     is_input=int(row[0]) in input_id_set,
                     is_output=int(row[0]) in output_id_set,
                 )
@@ -145,6 +157,18 @@ def genome_model_to_arrays(genome_template: Any, genome: GenomeModel) -> tuple[n
             nodes[index, 4] = float(node.slow_input_gain)
         if nodes.shape[1] > 5:
             nodes[index, 5] = float(node.slow_output_gain)
+        if nodes.shape[1] > 6:
+            nodes[index, 6] = float(node.content_w_key)
+        if nodes.shape[1] > 7:
+            nodes[index, 7] = float(node.content_b_key)
+        if nodes.shape[1] > 8:
+            nodes[index, 8] = float(node.content_w_query)
+        if nodes.shape[1] > 9:
+            nodes[index, 9] = float(node.content_b_query)
+        if nodes.shape[1] > 10:
+            nodes[index, 10] = float(node.content_temperature)
+        if nodes.shape[1] > 11:
+            nodes[index, 11] = float(node.content_b_match)
 
     for index, conn in enumerate(
         sorted(

@@ -15,6 +15,10 @@ from evolve.archive import (
     QD_PROFILE_CURRICULUM_PROGRESS,
     QD_PROFILE_DELAY_ROBUSTNESS,
     QD_PROFILE_GENERAL_COMPACTNESS,
+    QD_PROFILE_CONTENT_RETRIEVAL,
+    QD_PROFILE_GATING_MECHANISM,
+    QD_PROFILE_KV_RETRIEVAL_MECHANISM,
+    QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
     QD_PROFILE_RETRIEVAL_MECHANISM,
     QD_PROFILE_RETRIEVAL_STRATEGY,
     build_archive_cell,
@@ -111,6 +115,82 @@ def test_archive_descriptor_binning_is_deterministic_for_general_compactness() -
     assert first == second
     assert first.qd_profile == QD_PROFILE_GENERAL_COMPACTNESS
     assert "connbin_" in first.descriptor_key
+
+
+def test_archive_descriptor_binning_is_deterministic_for_gating_mechanism() -> None:
+    first = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        gate_selectivity=0.6,
+        qd_profile=QD_PROFILE_GATING_MECHANISM,
+    )
+    second = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        gate_selectivity=0.6,
+        qd_profile=QD_PROFILE_GATING_MECHANISM,
+    )
+    assert first == second
+    assert first.qd_profile == QD_PROFILE_GATING_MECHANISM
+    assert "gatebin_" in first.descriptor_key
+
+
+def test_archive_descriptor_binning_is_deterministic_for_content_retrieval() -> None:
+    first = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        match_selectivity=0.6,
+        qd_profile=QD_PROFILE_CONTENT_RETRIEVAL,
+    )
+    second = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        match_selectivity=0.6,
+        qd_profile=QD_PROFILE_CONTENT_RETRIEVAL,
+    )
+    assert first == second
+    assert first.qd_profile == QD_PROFILE_CONTENT_RETRIEVAL
+    assert "matchbin_" in first.descriptor_key
+
+
+def test_archive_descriptor_binning_is_deterministic_for_kv_retrieval_mechanism() -> None:
+    first = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        store_vs_distractor_write_gap=0.4,
+        qd_profile=QD_PROFILE_KV_RETRIEVAL_MECHANISM,
+    )
+    second = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        store_vs_distractor_write_gap=0.4,
+        qd_profile=QD_PROFILE_KV_RETRIEVAL_MECHANISM,
+    )
+    assert first == second
+    assert first.qd_profile == QD_PROFILE_KV_RETRIEVAL_MECHANISM
+    assert "writegapbin_" in first.descriptor_key
+
+
+def test_archive_descriptor_binning_is_deterministic_for_slot_retrieval_mechanism() -> None:
+    first = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        slot_write_focus=0.4,
+        slot_query_focus=0.6,
+        slot_utilization=1.0,
+        qd_profile=QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
+    )
+    second = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        slot_write_focus=0.4,
+        slot_query_focus=0.6,
+        slot_utilization=1.0,
+        qd_profile=QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
+    )
+    assert first == second
+    assert first.qd_profile == QD_PROFILE_SLOT_RETRIEVAL_MECHANISM
+    assert "slotfocusbin_" in first.descriptor_key
 
 
 def test_general_compactness_builds_for_all_variants() -> None:

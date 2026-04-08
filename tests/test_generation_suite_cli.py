@@ -359,10 +359,15 @@ def test_benchmark_suite_key_value_memory_supports_profile_overrides(tmp_path: P
         "curriculum_progress",
         "retrieval_strategy",
         "retrieval_mechanism",
+        "gating_mechanism",
+        "content_retrieval",
+        "kv_retrieval_mechanism",
     }
     markdown = (tmp_path / "kv-suite.md").read_text(encoding="utf-8")
     assert "## Retrieval Diagnostics" in markdown
     assert "mean_correct_key_selected" in markdown
+    assert "## KV Selectivity Diagnostics" in markdown
+    assert "mean_store_vs_distractor_write_gap" in markdown
     feature_rows = [
         json.loads(line)
         for line in (tmp_path / "kv-suite.candidate-features.jsonl").read_text(encoding="utf-8").splitlines()
@@ -370,3 +375,61 @@ def test_benchmark_suite_key_value_memory_supports_profile_overrides(tmp_path: P
     ]
     assert feature_rows
     assert feature_rows[0]["task_name"] == "key_value_memory"
+
+
+def test_benchmark_suite_supports_v11c_kv_preset_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v3_kv",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v11c_kv_selective.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v11c-selective-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v11c-selective-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v3_kv" in markdown
+
+
+def test_benchmark_suite_supports_v11d_kv_preset_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v3_kv",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v11d_kv_conservative_plus.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v11d-conservative-plus-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v11d-conservative-plus-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v3_kv" in markdown

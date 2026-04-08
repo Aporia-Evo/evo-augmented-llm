@@ -33,11 +33,11 @@ Neu als Proto-Use-Case:
 
 ### 1. TensorNEAT + Adapter
 
-Unter [src/tensorneat](/mnt/c/Users/joach/NEAT.wsl.projekt/src/tensorneat) liegt ein schlank vendorter Ausschnitt des echten TensorNEAT-Kerns. Darauf sitzt eine kleine Adapter-Schicht:
+Unter [src/tensorneat](src/tensorneat) liegt ein schlank vendorter Ausschnitt des echten TensorNEAT-Kerns. Darauf sitzt eine kleine Adapter-Schicht:
 
-- [tensorneat_adapter.py](/mnt/c/Users/joach/NEAT.wsl.projekt/src/evolve/tensorneat_adapter.py)
-- [rtneat_scheduler.py](/mnt/c/Users/joach/NEAT.wsl.projekt/src/evolve/rtneat_scheduler.py)
-- [candidate_registry.py](/mnt/c/Users/joach/NEAT.wsl.projekt/src/evolve/candidate_registry.py)
+- [tensorneat_adapter.py](src/evolve/tensorneat_adapter.py)
+- [rtneat_scheduler.py](src/evolve/rtneat_scheduler.py)
+- [candidate_registry.py](src/evolve/candidate_registry.py)
 
 TensorNEAT liefert weiterhin Struktur, Mutation und Crossover. Der rtNEAT-artige Online-Scheduler ist eigene Python-Orchestrierung darueber, keine erfundene TensorNEAT-API.
 
@@ -106,11 +106,25 @@ Darauf aufbauend gibt es jetzt einen kleinen V9-Pfad fuer transformer-nahe Retri
   - schaerfere Retrieval-Diagnostik wie `correct_key_selected` und `value_margin`
   - das neue Archivprofil `retrieval_mechanism`
 
+Darauf aufbauend gibt es jetzt einen kleinen V10-Pfad fuer selektiveres Gating und content-/key-value-nahe Retrieval-Mechaniken:
+
+- neue Varianten `stateful_v2_gated`, `content_gated`, `stateful_v3_kv`
+- neue, evolvierbare Content-Parameter:
+  - `content_w_key`, `content_b_key`
+  - `content_w_query`, `content_b_query`
+  - `content_temperature`, `content_b_match`
+- erweiterte Episodenmetriken fuer Gate-/Match-/Key-/Value-Ausrichtung
+- neue QD-Profile:
+  - `gating_mechanism`
+  - `content_retrieval`
+  - `kv_retrieval_mechanism`
+- zusaetzliches einfaches Task-Profil `key_value_memory_trivial` fuer fruehe Sanity-Checks
+
 Keine Spiking-Logik und keine variablen Aktivierungen. Plastizitaet bleibt aktuell ein separater Experimentalpfad, nicht der neue Default.
 
 ### 3. Online-State in SpacetimeDB
 
-Das TS-Modul unter [spacetimedb/src/index.ts](/mnt/c/Users/joach/NEAT.wsl.projekt/spacetimedb/src/index.ts) enthaelt jetzt sowohl den alten Generationspfad als auch den V4-Online-Pfad.
+Das TS-Modul unter [spacetimedb/src/index.ts](spacetimedb/src/index.ts) enthaelt jetzt sowohl den alten Generationspfad als auch den V4-Online-Pfad.
 
 Wichtige Online-Tabellen:
 
@@ -141,6 +155,7 @@ configs/
   key_value_memory_easy.yaml
   key_value_memory_mid.yaml
   key_value_memory_full.yaml
+  key_value_memory_trivial.yaml
   event_memory.yaml
   online.yaml
 scripts/
@@ -179,7 +194,7 @@ python -m pip install -r requirements.txt
 
 ### GPU unter WSL
 
-Optional liegt [requirements-gpu.txt](/mnt/c/Users/joach/NEAT.wsl.projekt/requirements-gpu.txt) fuer GPU-faehiges JAX bereit:
+Optional liegt [requirements-gpu.txt](requirements-gpu.txt) fuer GPU-faehiges JAX bereit:
 
 ```bash
 source "$HOME/.venvs/neat-xor-spacetimedb-v1/bin/activate"

@@ -75,6 +75,12 @@ def test_extract_candidate_features_handles_missing_metrics_for_old_variants() -
     assert feature.store_query_state_gap == 0.0
     assert feature.slow_fast_retrieval_ratio == 0.0
     assert feature.retrieval_state_alignment == 0.0
+    assert feature.gate_mean == 0.0
+    assert feature.gate_selectivity == 0.0
+    assert feature.match_mean == 0.0
+    assert feature.match_selectivity == 0.0
+    assert feature.mean_key_state == 0.0
+    assert feature.query_key_alignment == 0.0
     assert vector.norm_l2 >= 0.0
 
 
@@ -146,6 +152,51 @@ def test_extract_candidate_features_captures_retrieval_metrics() -> None:
         "mean_abs_slow_state_during_query": 1.5,
         "mean_abs_fast_state_during_distractor": 0.2,
         "mean_abs_slow_state_during_distractor": 0.3,
+        "gate_mean": 0.55,
+        "gate_variance": 0.04,
+        "gate_at_store": 0.3,
+        "gate_at_distractor": 0.8,
+        "gate_at_query": 0.4,
+        "gate_selectivity": 0.5,
+        "gate_store_minus_query": -0.1,
+        "gate_query_minus_distractor": -0.4,
+        "gate_role_contrast": 0.9,
+        "slow_state_at_query": 1.5,
+        "fast_state_at_query": 0.5,
+        "match_mean": 0.6,
+        "match_variance": 0.03,
+        "match_at_store": 0.7,
+        "match_at_distractor": 0.3,
+        "match_at_query": 0.9,
+        "match_selectivity": 0.4,
+        "query_match_score": 0.9,
+        "state_query_alignment": 0.8,
+        "content_retention_gap": 0.2,
+        "mean_key_state": 1.1,
+        "mean_value_state": 0.9,
+        "key_value_separation": 0.2,
+        "query_key_alignment": 0.7,
+        "query_value_read_strength": 0.6,
+        "store_key_value_coupling": 0.5,
+        "distractor_write_leak": 0.2,
+        "readout_selectivity": 0.4,
+        "mean_key_state_during_store": 1.0,
+        "mean_value_state_during_store": 0.8,
+        "mean_key_state_during_query": 1.2,
+        "mean_value_state_during_query": 1.0,
+        "write_gate_at_store": 0.72,
+        "write_gate_at_distractor": 0.21,
+        "write_gate_at_query": 0.34,
+        "store_vs_distractor_write_gap": 0.51,
+        "mean_match_signal": 0.44,
+        "value_state_at_query": 0.92,
+        "key_state_at_query": 1.31,
+        "slot_key_separation": 0.22,
+        "slot_value_separation": 0.37,
+        "slot_write_focus": 0.41,
+        "slot_query_focus": 0.53,
+        "slot_readout_selectivity": 0.26,
+        "slot_utilization": 1.0,
     }
 
     feature, _vector = extract_candidate_features(genome, raw_metrics, context)
@@ -169,6 +220,18 @@ def test_extract_candidate_features_captures_retrieval_metrics() -> None:
     assert abs(feature.store_query_state_gap - 0.1) <= 1e-9
     assert feature.slow_fast_retrieval_ratio == 3.0
     assert feature.retrieval_state_alignment > 0.9
+    assert feature.gate_mean == 0.55
+    assert feature.gate_selectivity == 0.5
+    assert feature.match_mean == 0.6
+    assert feature.match_selectivity == 0.4
+    assert feature.mean_key_state == 1.1
+    assert feature.query_key_alignment == 0.7
+    assert feature.store_vs_distractor_write_gap == 0.51
+    assert feature.query_value_read_strength == 0.6
+    assert feature.write_gate_at_store == 0.72
+    assert feature.slot_write_focus == 0.41
+    assert feature.slot_query_focus == 0.53
+    assert feature.slot_utilization == 1.0
 
 
 def test_in_memory_repository_stores_feature_values_and_hof_flag() -> None:
@@ -455,6 +518,114 @@ def test_analyze_search_space_supports_curriculum_phase_filter(tmp_path: Path, c
     assert "## Search Space Summary (phase_2)" in output
     assert "## By Curriculum Phase" not in output
     assert "3.950000" in output
+
+
+def test_analyze_search_space_reports_v11b_kv_hints(tmp_path: Path, capsys) -> None:
+    record = CandidateFeatureRecord(
+        candidate_id="c-kv",
+        run_id="run-kv",
+        benchmark_label="bench-v11b",
+        task_name="key_value_memory",
+        delay_steps=5,
+        variant="stateful_v3_kv",
+        seed=7,
+        generation=2,
+        hof_flag=False,
+        success=False,
+        final_max_score=0.8,
+        first_success_generation=None,
+        mean_alpha=0.0,
+        std_alpha=0.0,
+        mean_eta=0.0,
+        std_eta=0.0,
+        mean_plastic_d=0.0,
+        std_plastic_d=0.0,
+        plastic_d_at_lower_bound_fraction=0.0,
+        plastic_d_at_zero_fraction=0.0,
+        node_count=3,
+        enabled_conn_count=2,
+        mean_abs_delta_w=0.0,
+        max_abs_delta_w=0.0,
+        clamp_hit_rate=0.0,
+        plasticity_active_fraction=0.0,
+        store_vs_distractor_write_gap=0.0,
+        query_key_alignment=0.1,
+        query_value_read_strength=0.05,
+        readout_selectivity=0.1,
+    )
+    feature_path = tmp_path / "bench-v11b.candidate-features.jsonl"
+    write_feature_records_jsonl(feature_path, [record])
+
+    exit_code = main(
+        [
+            "analyze-search-space",
+            "--store",
+            "memory",
+            "--benchmark-label",
+            "bench-v11b",
+            "--task",
+            "key_value_memory",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Write-Gate bleibt zu undifferenziert" in output
+    assert "Query-Match bleibt schwach" in output
+    assert "destabilisiert aber den Schreibpfad" not in output
+
+
+def test_analyze_search_space_reports_readout_vs_write_tradeoff_hint(tmp_path: Path, capsys) -> None:
+    record = CandidateFeatureRecord(
+        candidate_id="c-kv-tradeoff",
+        run_id="run-kv",
+        benchmark_label="bench-v11c",
+        task_name="key_value_memory",
+        delay_steps=5,
+        variant="stateful_v3_kv",
+        seed=7,
+        generation=2,
+        hof_flag=False,
+        success=False,
+        final_max_score=0.8,
+        first_success_generation=None,
+        mean_alpha=0.0,
+        std_alpha=0.0,
+        mean_eta=0.0,
+        std_eta=0.0,
+        mean_plastic_d=0.0,
+        std_plastic_d=0.0,
+        plastic_d_at_lower_bound_fraction=0.0,
+        plastic_d_at_zero_fraction=0.0,
+        node_count=3,
+        enabled_conn_count=2,
+        mean_abs_delta_w=0.0,
+        max_abs_delta_w=0.0,
+        clamp_hit_rate=0.0,
+        plasticity_active_fraction=0.0,
+        store_vs_distractor_write_gap=-0.05,
+        query_key_alignment=0.6,
+        query_value_read_strength=0.7,
+    )
+    feature_path = tmp_path / "bench-v11c.candidate-features.jsonl"
+    write_feature_records_jsonl(feature_path, [record])
+    exit_code = main(
+        [
+            "analyze-search-space",
+            "--store",
+            "memory",
+            "--benchmark-label",
+            "bench-v11c",
+            "--task",
+            "key_value_memory",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "destabilisiert aber den Schreibpfad" in output
 
 
 def _context(*, variant: str = "stateful_plastic_ad") -> CandidateFeatureContext:
