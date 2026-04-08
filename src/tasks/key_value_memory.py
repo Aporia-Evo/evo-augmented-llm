@@ -17,17 +17,34 @@ class KeyValueMemoryProfile:
     max_stores: int
     gap_scale: float
     gap_bias: int
+    min_stores: int = 1
+    min_gap_count: int = 0
+    max_gap_count: int | None = None
     use_separator: bool = True
 
 
 KV_PROFILES: dict[str, KeyValueMemoryProfile] = {
+    "kv_trivial": KeyValueMemoryProfile(
+        name="kv_trivial",
+        active_keys=(0,),
+        value_levels=(0.0, 1.0),
+        max_stores=1,
+        min_stores=1,
+        gap_scale=0.0,
+        gap_bias=0,
+        min_gap_count=0,
+        max_gap_count=0,
+    ),
     "kv_easy": KeyValueMemoryProfile(
         name="kv_easy",
         active_keys=(0, 1),
         value_levels=(0.0, 0.5, 1.0),
         max_stores=2,
-        gap_scale=0.4,
+        min_stores=2,
+        gap_scale=0.2,
         gap_bias=0,
+        min_gap_count=1,
+        max_gap_count=2,
     ),
     "kv_mid": KeyValueMemoryProfile(
         name="kv_mid",
@@ -75,7 +92,11 @@ class KeyValueMemoryTask:
     @classmethod
     def create(cls, delay_steps: int = 3, *, profile: str = "kv_full") -> "KeyValueMemoryTask":
         profile_spec = _profile_spec(profile)
-        num_stores = _num_stores_for_delay(delay_steps, max_stores=profile_spec.max_stores)
+        num_stores = max(
+            int(profile_spec.min_stores),
+            _num_stores_for_delay(delay_steps, max_stores=profile_spec.max_stores),
+        )
+        num_stores = min(num_stores, int(profile_spec.max_stores))
         key_orders = _key_orders(profile_spec.active_keys, num_stores)
         value_levels = profile_spec.value_levels
         sequences: list[np.ndarray] = []
@@ -103,6 +124,11 @@ class KeyValueMemoryTask:
                     offset=order_index + pattern_index,
                     gap_scale=profile_spec.gap_scale,
                     gap_bias=profile_spec.gap_bias,
+                )
+                gap_counts = _apply_profile_constraints(
+                    gap_counts,
+                    min_gap_count=profile_spec.min_gap_count,
+                    max_gap_count=profile_spec.max_gap_count,
                 )
                 query_store_index = (order_index + pattern_index) % num_stores
                 query_key = key_order[query_store_index]
@@ -212,6 +238,23 @@ def _gap_counts(
         for gap_index in range(num_stores)
     ]
     return tuple(max(0, int(count)) for count in counts)
+
+
+def _apply_profile_constraints(
+    counts: tuple[int, ...],
+    *,
+    min_gap_count: int,
+    max_gap_count: int | None,
+) -> tuple[int, ...]:
+    min_gap = max(0, int(min_gap_count))
+    max_gap = None if max_gap_count is None else max(min_gap, int(max_gap_count))
+    constrained: list[int] = []
+    for count in counts:
+        bounded = max(min_gap, int(count))
+        if max_gap is not None:
+            bounded = min(max_gap, bounded)
+        constrained.append(bounded)
+    return tuple(constrained)
 
 
 def _store_event(key_id: int, value: float) -> list[float]:

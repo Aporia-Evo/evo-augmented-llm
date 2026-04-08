@@ -34,6 +34,23 @@ SUMMARY_FEATURES = [
     "query_key_match_score",
     "value_margin",
     "distractor_competition_score",
+    "slot_key_separation",
+    "slot_value_separation",
+    "slot_write_focus",
+    "slot_query_focus",
+    "slot_readout_selectivity",
+    "slot_utilization",
+    "query_slot_match_max",
+    "slot_distractor_leak",
+    "mean_write_address_focus",
+    "mean_read_address_focus",
+    "write_read_address_gap",
+    "slot_write_specialization",
+    "slot_read_specialization",
+    "address_consistency",
+    "query_read_alignment",
+    "store_write_alignment",
+    "readout_address_concentration",
     "mean_eta",
     "mean_plastic_d",
     "plastic_d_at_lower_bound_fraction",
@@ -242,6 +259,18 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
     mean_distractor_competition_score = _safe_mean([record.distractor_competition_score for record in records])
     mean_slow_query_coupling = _safe_mean([record.slow_query_coupling for record in records])
     mean_retrieval_state_alignment = _safe_mean([record.retrieval_state_alignment for record in records])
+    mean_store_vs_distractor_write_gap = _safe_mean([record.store_vs_distractor_write_gap for record in records])
+    mean_query_value_read_strength = _safe_mean([record.query_value_read_strength for record in records])
+    mean_readout_selectivity = _safe_mean([record.readout_selectivity for record in records])
+    mean_query_key_alignment_v11 = _safe_mean([record.query_key_alignment for record in records])
+    mean_slot_write_focus = _safe_mean([record.slot_write_focus for record in records])
+    mean_slot_query_focus = _safe_mean([record.slot_query_focus for record in records])
+    mean_slot_utilization = _safe_mean([record.slot_utilization for record in records])
+    mean_query_slot_match_max = _safe_mean([record.query_slot_match_max for record in records])
+    mean_slot_distractor_leak = _safe_mean([record.slot_distractor_leak for record in records])
+    mean_write_address_focus = _safe_mean([record.mean_write_address_focus for record in records])
+    mean_read_address_focus = _safe_mean([record.mean_read_address_focus for record in records])
+    mean_write_read_gap = _safe_mean([record.write_read_address_gap for record in records])
     mean_score_over_delays = _safe_mean([record.mean_score_over_delays for record in records])
     mean_delay_score_std = _safe_mean([record.delay_score_std for record in records])
     mean_delay_score_range = _safe_mean([record.delay_score_range for record in records])
@@ -320,6 +349,26 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
         if mean_distractor_competition_score >= 0.5:
             hints.append("Distraktoren konkurrieren sichtbar mit dem Zielsignal; der Retrieval-Pfad ist noch anfaellig fuer falsche Attraktoren.")
 
+        if mean_store_vs_distractor_write_gap <= 0.05:
+            hints.append("Schreibpfad trennt Store und Distraktor noch nicht sauber; das Write-Gate bleibt zu undifferenziert.")
+        elif mean_store_vs_distractor_write_gap >= 0.2:
+            hints.append("Store-Schritte schreiben deutlich staerker als Distraktoren; der Write-Pfad zeigt gute Selektivitaet.")
+
+        if mean_query_key_alignment_v11 <= 0.25:
+            hints.append("Query-Match bleibt schwach; die Query koppelt nur locker an den relevanten Key-Zustand.")
+
+        if mean_query_value_read_strength <= 0.2:
+            hints.append("Value-Readout ist vorhanden, aber zu instabil; Query-getriebene Auslesestaerke bleibt niedrig.")
+
+        if mean_query_key_alignment_v11 >= 0.5 and mean_query_value_read_strength <= 0.3:
+            hints.append("Key/Value-Trennung ist messbar, aber noch nicht funktional ausreichend fuer robustes Value-Retrieval.")
+
+        if mean_query_value_read_strength >= 0.5 and mean_store_vs_distractor_write_gap <= 0.0:
+            hints.append("Staerkerer Readout ist sichtbar, destabilisiert aber den Schreibpfad; die Write-Separation kippt noch nicht robust ins Positive.")
+
+        if mean_readout_selectivity >= 0.25:
+            hints.append("Readout bleibt zwischen Query und Distraktor klar getrennt; der Abrufpfad wirkt selektiver.")
+
         if mean_retrieval_state_alignment >= 0.75:
             hints.append("Store- und Query-Zustand bleiben gut ausgerichtet; relevante Information wird intern relativ konsistent weitergetragen.")
         elif mean_retrieval_state_alignment <= 0.4:
@@ -332,6 +381,23 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
             hints.append("Der slow-state-Zweig koppelt sichtbar in die Query-Phase ein; Retrieval wirkt nicht rein fast-state-getrieben.")
         else:
             hints.append("Der Query-Pfad bleibt eher fast-state-nah; slow-state-Retrieval ist noch nicht dominant ausgepraegt.")
+
+        if mean_slot_write_focus >= 0.1 and mean_slot_query_focus >= 0.1:
+            hints.append("Der Slot-Pfad zeigt fokussiertes Schreiben und Query-Selektion; stateful_v4_slots wirkt funktional getrennt.")
+        elif mean_slot_utilization <= 0.6:
+            hints.append("Slot-Nutzung ist unausgewogen; mindestens ein Slot bleibt oft ungenutzt und begrenzt die Retrieval-Kapazitaet.")
+        else:
+            hints.append("Slot-Pfad ist aktiv, aber Fokus bleibt weich; die Slot-Entscheidung ist noch nicht deutlich genug separiert.")
+        if mean_query_slot_match_max <= 0.55:
+            hints.append("Query fokussiert Slots noch zu schwach; kein klar dominanter Match-Slot waehrend der Query.")
+        elif mean_slot_distractor_leak >= 0.2:
+            hints.append("Query-Fokus steigt, aber Distraktor-Leak im Slot-Readout bleibt erhoeht.")
+        else:
+            hints.append("Query-Fokus und Slot-Readout wirken gemeinsam schaerfer bei begrenztem Distraktor-Leak.")
+        if mean_read_address_focus > mean_write_address_focus + 0.05:
+            hints.append("Explizites Read-Addressing wirkt schaerfer als Write-Addressing; Query greift selektiver zu als Stores schreiben.")
+        elif mean_write_read_gap < 0.0:
+            hints.append("Write-Addressing dominiert Read-Addressing; funktionale Trennung zwischen Schreiben und Lesen bleibt begrenzt.")
 
     if phase_one_records and phase_two_records:
         phase_one_score = _safe_mean([record.score_current_phase for record in phase_one_records])

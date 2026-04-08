@@ -33,13 +33,17 @@ def test_key_value_memory_delay_increases_context_pressure() -> None:
 
 
 def test_key_value_memory_profiles_scale_retrieval_difficulty() -> None:
+    trivial = KeyValueMemoryTask.create(delay_steps=8, profile="kv_trivial")
     easy = KeyValueMemoryTask.create(delay_steps=8, profile="kv_easy")
     mid = KeyValueMemoryTask.create(delay_steps=8, profile="kv_mid")
     full = KeyValueMemoryTask.create(delay_steps=8, profile="kv_full")
 
+    assert trivial.profile_name == "kv_trivial"
     assert easy.profile_name == "kv_easy"
     assert mid.profile_name == "kv_mid"
     assert full.profile_name == "kv_full"
+    assert trivial.num_stores == 1
+    assert float(np.mean(trivial.distractor_loads)) == 0.0
     assert len(easy.value_levels) < len(full.value_levels)
     assert easy.num_stores <= mid.num_stores <= full.num_stores
     assert float(np.mean(easy.query_distances)) <= float(np.mean(mid.query_distances))
