@@ -1,0 +1,18 @@
+mutation:
+  alpha_init_mean: 0.4
+  alpha_slow_init_mean: 0.86
+  content_w_key_mutate_power: 0.18
+  content_b_key_mutate_power: 0.18
+  content_w_query_init_min: 0.3
+  content_w_query_init_max: 1.2
+  content_w_query_mutate_power: 0.18
+  content_b_query_init_min: 0.4
+  content_b_query_init_max: 1.2
+  content_b_query_mutate_power: 0.16
+  content_temperature_init_min: 1.8
+  content_temperature_init_max: 3.0
+  content_temperature_mutate_power: 0.18
+  content_b_match_init_min: -0.2
+  content_b_match_init_max: 0.8
+  content_b_match_mutate_power: 0.2
+  content_mutate_rate: 0.6

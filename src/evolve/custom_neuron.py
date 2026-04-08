@@ -80,6 +80,62 @@ class PlasticityEpisodeMetrics:
     mean_abs_slow_state_during_query: float = 0.0
     mean_abs_fast_state_during_distractor: float = 0.0
     mean_abs_slow_state_during_distractor: float = 0.0
+    gate_mean: float = 0.0
+    gate_variance: float = 0.0
+    gate_at_store: float = 0.0
+    gate_at_distractor: float = 0.0
+    gate_at_query: float = 0.0
+    gate_selectivity: float = 0.0
+    gate_store_minus_query: float = 0.0
+    gate_query_minus_distractor: float = 0.0
+    gate_role_contrast: float = 0.0
+    slow_state_at_query: float = 0.0
+    fast_state_at_query: float = 0.0
+    match_mean: float = 0.0
+    match_variance: float = 0.0
+    match_at_store: float = 0.0
+    match_at_distractor: float = 0.0
+    match_at_query: float = 0.0
+    match_selectivity: float = 0.0
+    query_match_score: float = 0.0
+    state_query_alignment: float = 0.0
+    content_retention_gap: float = 0.0
+    mean_key_state: float = 0.0
+    mean_value_state: float = 0.0
+    key_value_separation: float = 0.0
+    query_key_alignment: float = 0.0
+    query_value_read_strength: float = 0.0
+    store_key_value_coupling: float = 0.0
+    distractor_write_leak: float = 0.0
+    readout_selectivity: float = 0.0
+    mean_key_state_during_store: float = 0.0
+    mean_value_state_during_store: float = 0.0
+    mean_key_state_during_query: float = 0.0
+    mean_value_state_during_query: float = 0.0
+    write_gate_at_store: float = 0.0
+    write_gate_at_distractor: float = 0.0
+    write_gate_at_query: float = 0.0
+    store_vs_distractor_write_gap: float = 0.0
+    mean_match_signal: float = 0.0
+    value_state_at_query: float = 0.0
+    key_state_at_query: float = 0.0
+    slot_key_separation: float = 0.0
+    slot_value_separation: float = 0.0
+    slot_write_focus: float = 0.0
+    slot_query_focus: float = 0.0
+    slot_readout_selectivity: float = 0.0
+    slot_utilization: float = 0.0
+    query_slot_match_max: float = 0.0
+    slot_distractor_leak: float = 0.0
+    mean_write_address_focus: float = 0.0
+    mean_read_address_focus: float = 0.0
+    write_read_address_gap: float = 0.0
+    slot_write_specialization: float = 0.0
+    slot_read_specialization: float = 0.0
+    address_consistency: float = 0.0
+    query_read_alignment: float = 0.0
+    store_write_alignment: float = 0.0
+    readout_address_concentration: float = 0.0
 
 
 def _incoming_connections_by_target(genome: GenomeModel) -> dict[int, list[ConnectionGeneModel]]:
@@ -302,6 +358,626 @@ class StatefulV2NetworkExecutor(StatefulNetworkExecutor):
             mean_abs_slow_state_during_query=_role_mean(role_totals, "query", index=1),
             mean_abs_fast_state_during_distractor=_role_mean(role_totals, "distractor", index=0),
             mean_abs_slow_state_during_distractor=_role_mean(role_totals, "distractor", index=1),
+        )
+        return np.vstack(sequence_outputs)
+
+    def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
+        return self._last_metrics
+
+
+class StatefulV2GatedNetworkExecutor(StatefulNetworkExecutor):
+    def __init__(self, activation_steps: int, *, slow_write_scale: float = 1.0) -> None:
+        super().__init__(activation_steps=activation_steps)
+        self.slow_write_scale = float(slow_write_scale)
+        self._last_metrics = PlasticityEpisodeMetrics(plasticity_enabled=False, mean_abs_delta_w=0.0, max_abs_delta_w=0.0, clamp_hit_rate=0.0, plasticity_active_fraction=0.0, mean_abs_decay_term=0.0, max_abs_decay_term=0.0, decay_effect_ratio=0.0, decay_near_zero_fraction=0.0)
+
+    def run_sequence(
+        self,
+        genome: GenomeModel,
+        input_sequence: Sequence[Sequence[float]],
+        *,
+        step_roles: Sequence[str] | None = None,
+    ) -> np.ndarray:
+        incoming_by_target = _incoming_connections_by_target(genome)
+        fast_memory = {node.node_id: 0.0 for node in genome.nodes if not node.is_input}
+        slow_memory = {node.node_id: 0.0 for node in genome.nodes if not node.is_input}
+        outputs = {node.node_id: 0.0 for node in genome.nodes}
+        sequence_outputs: list[np.ndarray] = []
+        total_abs_fast_state = 0.0
+        total_abs_slow_state = 0.0
+        total_node_updates = 0
+        gate_values: list[float] = []
+        role_totals: dict[str, tuple[float, float, float, int]] = {}
+
+        for step_index, inputs in enumerate(input_sequence):
+            step_role = _step_role_at(step_roles, step_index)
+            input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
+            outputs.update(input_map)
+            for _ in range(self.activation_steps):
+                previous_outputs = dict(outputs)
+                next_outputs = dict(input_map)
+                for node in genome.nodes:
+                    if node.is_input:
+                        continue
+                    incoming_sum = 0.0
+                    for conn in incoming_by_target.get(node.node_id, ()):
+                        incoming_sum += conn.weight * previous_outputs.get(conn.in_id, 0.0)
+                    x_input_norm = incoming_sum / (1.0 + abs(incoming_sum))
+                    gate = 1.0 / (1.0 + math.exp(-(node.alpha * x_input_norm + node.slow_input_gain)))
+                    write_factor = 1.0 - gate
+                    new_fast_memory = (gate * fast_memory[node.node_id]) + (write_factor * (incoming_sum + node.bias))
+                    new_slow_memory = (
+                        clamp_alpha(node.alpha_slow) * slow_memory[node.node_id]
+                        + (self.slow_write_scale * write_factor * (incoming_sum + node.slow_output_gain))
+                    )
+                    fast_memory[node.node_id] = new_fast_memory
+                    slow_memory[node.node_id] = new_slow_memory
+                    next_outputs[node.node_id] = math.tanh(new_fast_memory + new_slow_memory)
+                    total_abs_fast_state += abs(new_fast_memory)
+                    total_abs_slow_state += abs(new_slow_memory)
+                    total_node_updates += 1
+                    gate_values.append(gate)
+                    if step_role in {"store", "query", "distractor"}:
+                        gate_total, fast_total, slow_total, count = role_totals.get(step_role, (0.0, 0.0, 0.0, 0))
+                        role_totals[step_role] = (gate_total + gate, fast_total + abs(new_fast_memory), slow_total + abs(new_slow_memory), count + 1)
+                outputs = next_outputs
+            sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
+
+        gate_at_store = _role_mean_4(role_totals, "store", index=0)
+        gate_at_distractor = _role_mean_4(role_totals, "distractor", index=0)
+        gate_at_query = _role_mean_4(role_totals, "query", index=0)
+        fast_at_query = _role_mean_4(role_totals, "query", index=1)
+        slow_at_query = _role_mean_4(role_totals, "query", index=2)
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+            mean_abs_fast_state=(total_abs_fast_state / total_node_updates) if total_node_updates else 0.0,
+            mean_abs_slow_state=(total_abs_slow_state / total_node_updates) if total_node_updates else 0.0,
+            slow_fast_contribution_ratio=(total_abs_slow_state / total_abs_fast_state) if total_abs_fast_state > 1e-9 else 0.0,
+            mean_abs_fast_state_during_store=_role_mean_4(role_totals, "store", index=1),
+            mean_abs_slow_state_during_store=_role_mean_4(role_totals, "store", index=2),
+            mean_abs_fast_state_during_query=fast_at_query,
+            mean_abs_slow_state_during_query=slow_at_query,
+            mean_abs_fast_state_during_distractor=_role_mean_4(role_totals, "distractor", index=1),
+            mean_abs_slow_state_during_distractor=_role_mean_4(role_totals, "distractor", index=2),
+            gate_mean=float(np.mean(gate_values)) if gate_values else 0.0,
+            gate_variance=float(np.var(gate_values)) if gate_values else 0.0,
+            gate_at_store=gate_at_store,
+            gate_at_distractor=gate_at_distractor,
+            gate_at_query=gate_at_query,
+            gate_selectivity=abs(gate_at_store - gate_at_distractor),
+            gate_store_minus_query=(gate_at_store - gate_at_query),
+            gate_query_minus_distractor=(gate_at_query - gate_at_distractor),
+            gate_role_contrast=abs(gate_at_store - gate_at_distractor) + abs(gate_at_query - gate_at_distractor),
+            slow_state_at_query=slow_at_query,
+            fast_state_at_query=fast_at_query,
+        )
+        return np.vstack(sequence_outputs)
+
+    def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
+        return self._last_metrics
+
+
+class ContentGatedNetworkExecutor(StatefulNetworkExecutor):
+    def __init__(self, activation_steps: int) -> None:
+        super().__init__(activation_steps=activation_steps)
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+        )
+
+    def run_sequence(
+        self,
+        genome: GenomeModel,
+        input_sequence: Sequence[Sequence[float]],
+        *,
+        step_roles: Sequence[str] | None = None,
+    ) -> np.ndarray:
+        incoming_by_target = _incoming_connections_by_target(genome)
+        memory = {node.node_id: 0.0 for node in genome.nodes if not node.is_input}
+        outputs = {node.node_id: 0.0 for node in genome.nodes}
+        sequence_outputs: list[np.ndarray] = []
+        match_values: list[float] = []
+        role_totals: dict[str, tuple[float, float, int]] = {}
+        total_abs_state = 0.0
+        total_updates = 0
+
+        for step_index, inputs in enumerate(input_sequence):
+            step_role = _step_role_at(step_roles, step_index)
+            input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
+            outputs.update(input_map)
+            for _ in range(self.activation_steps):
+                previous_outputs = dict(outputs)
+                next_outputs = dict(input_map)
+                for node in genome.nodes:
+                    if node.is_input:
+                        continue
+                    incoming_sum = 0.0
+                    for conn in incoming_by_target.get(node.node_id, ()):
+                        incoming_sum += conn.weight * previous_outputs.get(conn.in_id, 0.0)
+                    prev_state = memory[node.node_id]
+                    pre_t = incoming_sum + node.bias
+                    key_t = math.tanh((node.content_w_key * pre_t) + node.content_b_key)
+                    query_t = math.tanh((node.content_w_query * prev_state) + node.content_b_query)
+                    match_t = 1.0 / (1.0 + math.exp(-((node.content_temperature * key_t * query_t) + node.content_b_match)))
+                    new_state = (clamp_alpha(node.alpha) * prev_state) + (match_t * pre_t)
+                    node_output = math.tanh((match_t * pre_t) + ((1.0 - match_t) * prev_state))
+                    memory[node.node_id] = new_state
+                    next_outputs[node.node_id] = node_output
+                    match_values.append(match_t)
+                    total_abs_state += abs(new_state)
+                    total_updates += 1
+                    if step_role in {"store", "query", "distractor"}:
+                        match_total, state_total, count = role_totals.get(step_role, (0.0, 0.0, 0))
+                        role_totals[step_role] = (match_total + match_t, state_total + abs(new_state), count + 1)
+                outputs = next_outputs
+            sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
+
+        match_at_store = _role_mean(role_totals, "store", index=0)
+        match_at_query = _role_mean(role_totals, "query", index=0)
+        match_at_distractor = _role_mean(role_totals, "distractor", index=0)
+        state_store = _role_mean(role_totals, "store", index=1)
+        state_query = _role_mean(role_totals, "query", index=1)
+        denom = abs(state_store) + abs(state_query)
+        alignment = 1.0 - (abs(state_store - state_query) / denom) if denom > 1e-9 else 0.0
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+            mean_abs_fast_state=(total_abs_state / total_updates) if total_updates else 0.0,
+            match_mean=float(np.mean(match_values)) if match_values else 0.0,
+            match_variance=float(np.var(match_values)) if match_values else 0.0,
+            match_at_store=match_at_store,
+            match_at_distractor=match_at_distractor,
+            match_at_query=match_at_query,
+            match_selectivity=abs(match_at_store - match_at_distractor),
+            query_match_score=match_at_query,
+            state_query_alignment=max(0.0, min(1.0, alignment)),
+            content_retention_gap=abs(state_store - state_query),
+        )
+        return np.vstack(sequence_outputs)
+
+    def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
+        return self._last_metrics
+
+
+class StatefulV3KVNetworkExecutor(StatefulNetworkExecutor):
+    def __init__(self, activation_steps: int) -> None:
+        super().__init__(activation_steps=activation_steps)
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+        )
+
+    def run_sequence(
+        self,
+        genome: GenomeModel,
+        input_sequence: Sequence[Sequence[float]],
+        *,
+        step_roles: Sequence[str] | None = None,
+    ) -> np.ndarray:
+        incoming_by_target = _incoming_connections_by_target(genome)
+        key_state = {node.node_id: 0.0 for node in genome.nodes if not node.is_input}
+        value_state = {node.node_id: 0.0 for node in genome.nodes if not node.is_input}
+        outputs = {node.node_id: 0.0 for node in genome.nodes}
+        sequence_outputs: list[np.ndarray] = []
+        total_abs_key = 0.0
+        total_abs_value = 0.0
+        total_abs_sep = 0.0
+        total_updates = 0
+        query_alignment_vals: list[float] = []
+        query_read_vals: list[float] = []
+        store_coupling_vals: list[float] = []
+        distractor_write_vals: list[float] = []
+        write_gate_store_vals: list[float] = []
+        write_gate_query_vals: list[float] = []
+        readout_query_vals: list[float] = []
+        readout_distractor_vals: list[float] = []
+        match_vals: list[float] = []
+        match_query_vals: list[float] = []
+        key_state_query_vals: list[float] = []
+        value_state_query_vals: list[float] = []
+        role_totals: dict[str, tuple[float, float, int]] = {}
+
+        for step_index, inputs in enumerate(input_sequence):
+            step_role = _step_role_at(step_roles, step_index)
+            input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
+            outputs.update(input_map)
+            store_signal = float(inputs[0]) if len(inputs) > 0 else 0.0
+            query_signal = float(inputs[1]) if len(inputs) > 1 else 0.0
+            distractor_signal = float(inputs[2]) if len(inputs) > 2 else 0.0
+            for _ in range(self.activation_steps):
+                previous_outputs = dict(outputs)
+                next_outputs = dict(input_map)
+                for node in genome.nodes:
+                    if node.is_input:
+                        continue
+                    summed_input = 0.0
+                    for conn in incoming_by_target.get(node.node_id, ()):
+                        summed_input += conn.weight * previous_outputs.get(conn.in_id, 0.0)
+                    input_norm = summed_input / (1.0 + abs(summed_input))
+                    write_gate = 1.0 / (
+                        1.0
+                        + math.exp(
+                            -(
+                                (node.content_w_key * input_norm)
+                                + (node.content_w_query * store_signal)
+                                - (node.content_b_query * distractor_signal)
+                                + node.content_b_key
+                            )
+                        )
+                    )
+                    key_input = summed_input + node.bias
+                    value_input = summed_input + node.slow_output_gain
+                    new_key = (clamp_alpha(node.alpha) * key_state[node.node_id]) + (write_gate * key_input)
+                    new_value = (clamp_alpha(node.alpha_slow) * value_state[node.node_id]) + (write_gate * value_input)
+                    match_t = 1.0 / (
+                        1.0
+                        + math.exp(
+                            -(
+                                (node.content_temperature * query_signal * (new_key / (1.0 + abs(new_key))))
+                                + node.content_b_match
+                            )
+                        )
+                    )
+                    readout_t = match_t * new_value
+                    next_outputs[node.node_id] = math.tanh(summed_input + readout_t)
+                    key_state[node.node_id] = new_key
+                    value_state[node.node_id] = new_value
+                    total_abs_key += abs(new_key)
+                    total_abs_value += abs(new_value)
+                    total_abs_sep += abs(new_key - new_value)
+                    total_updates += 1
+                    if step_role in {"store", "query", "distractor"}:
+                        key_total, value_total, count = role_totals.get(step_role, (0.0, 0.0, 0))
+                        role_totals[step_role] = (key_total + abs(new_key), value_total + abs(new_value), count + 1)
+                    match_vals.append(match_t)
+                    if step_role == "query":
+                        query_alignment_vals.append(abs(query_signal * new_key))
+                        query_read_vals.append(abs(readout_t))
+                        readout_query_vals.append(abs(readout_t))
+                        match_query_vals.append(match_t)
+                        write_gate_query_vals.append(write_gate)
+                        key_state_query_vals.append(abs(new_key))
+                        value_state_query_vals.append(abs(new_value))
+                    if step_role == "store":
+                        store_coupling_vals.append(abs(new_key * new_value))
+                        write_gate_store_vals.append(write_gate)
+                    if step_role == "distractor":
+                        distractor_write_vals.append(write_gate)
+                        readout_distractor_vals.append(abs(readout_t))
+                outputs = next_outputs
+            sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
+
+        readout_query = float(np.mean(readout_query_vals)) if readout_query_vals else 0.0
+        readout_distractor = float(np.mean(readout_distractor_vals)) if readout_distractor_vals else 0.0
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+            mean_key_state=(total_abs_key / total_updates) if total_updates else 0.0,
+            mean_value_state=(total_abs_value / total_updates) if total_updates else 0.0,
+            key_value_separation=(total_abs_sep / total_updates) if total_updates else 0.0,
+            query_key_alignment=float(np.mean(query_alignment_vals)) if query_alignment_vals else 0.0,
+            query_value_read_strength=float(np.mean(query_read_vals)) if query_read_vals else 0.0,
+            store_key_value_coupling=float(np.mean(store_coupling_vals)) if store_coupling_vals else 0.0,
+            distractor_write_leak=float(np.mean(distractor_write_vals)) if distractor_write_vals else 0.0,
+            readout_selectivity=abs(readout_query - readout_distractor),
+            mean_key_state_during_store=_role_mean(role_totals, "store", index=0),
+            mean_value_state_during_store=_role_mean(role_totals, "store", index=1),
+            mean_key_state_during_query=_role_mean(role_totals, "query", index=0),
+            mean_value_state_during_query=_role_mean(role_totals, "query", index=1),
+            write_gate_at_store=float(np.mean(write_gate_store_vals)) if write_gate_store_vals else 0.0,
+            write_gate_at_distractor=float(np.mean(distractor_write_vals)) if distractor_write_vals else 0.0,
+            write_gate_at_query=float(np.mean(write_gate_query_vals)) if write_gate_query_vals else 0.0,
+            store_vs_distractor_write_gap=(
+                float(np.mean(write_gate_store_vals)) - float(np.mean(distractor_write_vals))
+                if write_gate_store_vals and distractor_write_vals
+                else 0.0
+            ),
+            mean_match_signal=float(np.mean(match_vals)) if match_vals else 0.0,
+            value_state_at_query=float(np.mean(value_state_query_vals)) if value_state_query_vals else 0.0,
+            key_state_at_query=float(np.mean(key_state_query_vals)) if key_state_query_vals else 0.0,
+            match_at_query=float(np.mean(match_query_vals)) if match_query_vals else 0.0,
+        )
+        return np.vstack(sequence_outputs)
+
+    def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
+        return self._last_metrics
+
+
+class StatefulV4SlotsNetworkExecutor(StatefulNetworkExecutor):
+    def __init__(self, activation_steps: int) -> None:
+        super().__init__(activation_steps=activation_steps)
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+        )
+
+    def run_sequence(
+        self,
+        genome: GenomeModel,
+        input_sequence: Sequence[Sequence[float]],
+        *,
+        step_roles: Sequence[str] | None = None,
+    ) -> np.ndarray:
+        incoming_by_target = _incoming_connections_by_target(genome)
+        slot_count = 2
+        slot_keys = {node.node_id: [0.0 for _ in range(slot_count)] for node in genome.nodes if not node.is_input}
+        slot_values = {node.node_id: [0.0 for _ in range(slot_count)] for node in genome.nodes if not node.is_input}
+        outputs = {node.node_id: 0.0 for node in genome.nodes}
+        sequence_outputs: list[np.ndarray] = []
+        write_focus_vals: list[float] = []
+        query_focus_vals: list[float] = []
+        readout_selectivity_vals: list[float] = []
+        query_slot_match_max_vals: list[float] = []
+        distractor_leak_vals: list[float] = []
+        slot_key_sep_vals: list[float] = []
+        slot_value_sep_vals: list[float] = []
+        slot_hits = [0, 0]
+
+        for step_index, inputs in enumerate(input_sequence):
+            step_role = _step_role_at(step_roles, step_index)
+            input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
+            outputs.update(input_map)
+            query_signal = float(inputs[1]) if len(inputs) > 1 else 0.0
+            store_signal = float(inputs[0]) if len(inputs) > 0 else 0.0
+            distractor_signal = float(inputs[2]) if len(inputs) > 2 else 0.0
+            key_bits = np.asarray([float(inputs[4]), float(inputs[5]), float(inputs[6])] if len(inputs) > 6 else [0.0, 0.0, 0.0])
+            key_index = int(np.argmax(key_bits)) if float(np.sum(key_bits)) > 0.0 else 0
+            active_slot = int(key_index % slot_count)
+            slot_hits[active_slot] += 1
+            for _ in range(self.activation_steps):
+                previous_outputs = dict(outputs)
+                next_outputs = dict(input_map)
+                for node in genome.nodes:
+                    if node.is_input:
+                        continue
+                    summed_input = 0.0
+                    for conn in incoming_by_target.get(node.node_id, ()):
+                        summed_input += conn.weight * previous_outputs.get(conn.in_id, 0.0)
+                    input_norm = summed_input / (1.0 + abs(summed_input))
+                    write_gate = 1.0 / (1.0 + math.exp(-((node.content_w_key * input_norm) + (node.content_b_key * store_signal))))
+                    value_gate = 1.0 / (1.0 + math.exp(-((node.content_w_query * input_norm) + node.content_b_query)))
+                    for slot_index in range(slot_count):
+                        slot_mask = 1.0 if slot_index == active_slot else 0.0
+                        decay = clamp_alpha(node.alpha if slot_index == 0 else node.alpha_slow)
+                        slot_keys[node.node_id][slot_index] = (
+                            decay * slot_keys[node.node_id][slot_index]
+                            + (write_gate * store_signal * slot_mask * input_norm)
+                        )
+                        slot_values[node.node_id][slot_index] = (
+                            decay * slot_values[node.node_id][slot_index]
+                            + (value_gate * store_signal * slot_mask * (summed_input + node.slow_output_gain))
+                        )
+                    query_key = query_signal * (0.5 + abs(input_norm))
+                    match_scale = max(0.5, float(node.content_temperature))
+                    match_bias = float(node.content_b_match)
+                    logits = np.asarray(
+                        [
+                            (match_scale * query_key * slot_keys[node.node_id][slot_idx]) + match_bias
+                            for slot_idx in range(slot_count)
+                        ],
+                        dtype=np.float64,
+                    )
+                    logits = logits - float(np.max(logits))
+                    probs = np.exp(logits)
+                    denom = float(np.sum(probs))
+                    weights = probs / denom if denom > 0.0 else np.asarray([0.5, 0.5], dtype=np.float64)
+                    slot_values_arr = np.asarray(slot_values[node.node_id], dtype=np.float64)
+                    primary_readout = float(np.sum(weights * slot_values_arr))
+                    residual_readout = 0.5 * float(np.mean(slot_values_arr))
+                    dominant_match = float(np.max(weights))
+                    focus_gate = 1.0 / (
+                        1.0
+                        + math.exp(
+                            -(
+                                (2.0 * dominant_match)
+                                + (0.5 * match_scale)
+                                + (0.25 * node.content_b_query)
+                            )
+                        )
+                    )
+                    leak_suppress = max(0.2, 1.0 - (0.6 * max(0.0, distractor_signal)))
+                    readout = leak_suppress * ((focus_gate * primary_readout) + ((1.0 - focus_gate) * residual_readout))
+                    next_outputs[node.node_id] = math.tanh(summed_input + readout)
+                    if step_role == "store":
+                        write_focus_vals.append(abs(slot_keys[node.node_id][0] - slot_keys[node.node_id][1]))
+                    if step_role == "query":
+                        query_focus_vals.append(abs(float(weights[0]) - float(weights[1])))
+                        readout_selectivity_vals.append(abs(readout))
+                        query_slot_match_max_vals.append(float(np.max(weights)))
+                    if step_role == "distractor":
+                        distractor_leak_vals.append(abs(readout))
+                    slot_key_sep_vals.append(abs(slot_keys[node.node_id][0] - slot_keys[node.node_id][1]))
+                    slot_value_sep_vals.append(abs(slot_values[node.node_id][0] - slot_values[node.node_id][1]))
+                outputs = next_outputs
+            sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
+
+        total_hits = max(1, slot_hits[0] + slot_hits[1])
+        utilization = len([hit for hit in slot_hits if hit > 0]) / slot_count
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+            slot_key_separation=float(np.mean(slot_key_sep_vals)) if slot_key_sep_vals else 0.0,
+            slot_value_separation=float(np.mean(slot_value_sep_vals)) if slot_value_sep_vals else 0.0,
+            slot_write_focus=float(np.mean(write_focus_vals)) if write_focus_vals else 0.0,
+            slot_query_focus=float(np.mean(query_focus_vals)) if query_focus_vals else 0.0,
+            slot_readout_selectivity=float(np.mean(readout_selectivity_vals)) if readout_selectivity_vals else 0.0,
+            slot_utilization=max(utilization, min(slot_hits) / total_hits),
+            query_slot_match_max=float(np.mean(query_slot_match_max_vals)) if query_slot_match_max_vals else 0.0,
+            slot_distractor_leak=float(np.mean(distractor_leak_vals)) if distractor_leak_vals else 0.0,
+        )
+        return np.vstack(sequence_outputs)
+
+    def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
+        return self._last_metrics
+
+
+class StatefulV5AddressedSlotsNetworkExecutor(StatefulNetworkExecutor):
+    def __init__(self, activation_steps: int) -> None:
+        super().__init__(activation_steps=activation_steps)
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+        )
+
+    def run_sequence(
+        self,
+        genome: GenomeModel,
+        input_sequence: Sequence[Sequence[float]],
+        *,
+        step_roles: Sequence[str] | None = None,
+    ) -> np.ndarray:
+        incoming_by_target = _incoming_connections_by_target(genome)
+        slot_count = 2
+        slot_keys = {node.node_id: [0.0 for _ in range(slot_count)] for node in genome.nodes if not node.is_input}
+        slot_values = {node.node_id: [0.0 for _ in range(slot_count)] for node in genome.nodes if not node.is_input}
+        outputs = {node.node_id: 0.0 for node in genome.nodes}
+        sequence_outputs: list[np.ndarray] = []
+        write_focus_vals: list[float] = []
+        read_focus_vals: list[float] = []
+        gap_vals: list[float] = []
+        write_alignment_vals: list[float] = []
+        read_alignment_vals: list[float] = []
+        consistency_vals: list[float] = []
+        leak_vals: list[float] = []
+        concentration_vals: list[float] = []
+
+        for step_index, inputs in enumerate(input_sequence):
+            step_role = _step_role_at(step_roles, step_index)
+            input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
+            outputs.update(input_map)
+            store_signal = float(inputs[0]) if len(inputs) > 0 else 0.0
+            query_signal = float(inputs[1]) if len(inputs) > 1 else 0.0
+            distractor_signal = float(inputs[2]) if len(inputs) > 2 else 0.0
+            key_bits = np.asarray([float(inputs[4]), float(inputs[5]), float(inputs[6])] if len(inputs) > 6 else [0.0, 0.0, 0.0])
+            key_strength = float(np.max(key_bits)) if key_bits.size else 0.0
+            for _ in range(self.activation_steps):
+                previous_outputs = dict(outputs)
+                next_outputs = dict(input_map)
+                for node in genome.nodes:
+                    if node.is_input:
+                        continue
+                    summed_input = 0.0
+                    for conn in incoming_by_target.get(node.node_id, ()):
+                        summed_input += conn.weight * previous_outputs.get(conn.in_id, 0.0)
+                    input_norm = summed_input / (1.0 + abs(summed_input))
+                    write_signal = (node.content_w_key * input_norm) + (node.content_b_key * store_signal)
+                    read_signal = (node.content_w_query * input_norm) + (node.content_b_query * query_signal)
+                    write_scale = max(0.5, abs(float(node.content_temperature)))
+                    read_scale = max(0.5, abs(float(node.content_temperature + node.content_b_match)))
+                    slot_write_keys = (1.0 + node.content_w_key, -1.0 - node.content_w_key)
+                    slot_read_keys = (1.0 + node.content_w_query, -1.0 - node.content_w_query)
+                    write_addr = np.asarray(
+                        [1.0 / (1.0 + math.exp(-((write_scale * write_signal * slot_write_keys[s]) + node.content_b_key))) for s in range(slot_count)],
+                        dtype=np.float64,
+                    )
+                    read_addr_raw = np.asarray(
+                        [1.0 / (1.0 + math.exp(-((read_scale * read_signal * slot_read_keys[s]) + node.content_b_match))) for s in range(slot_count)],
+                        dtype=np.float64,
+                    )
+                    read_den = float(np.sum(read_addr_raw))
+                    read_addr = (read_addr_raw / read_den) if read_den > 0.0 else np.asarray([0.5, 0.5], dtype=np.float64)
+                    key_input = store_signal * input_norm
+                    value_input = store_signal * (summed_input + node.slow_output_gain)
+                    for s in range(slot_count):
+                        slot_keys[node.node_id][s] = (clamp_alpha(node.alpha) * slot_keys[node.node_id][s]) + (write_addr[s] * key_input)
+                        slot_values[node.node_id][s] = (clamp_alpha(node.alpha_slow) * slot_values[node.node_id][s]) + (write_addr[s] * value_input)
+                    slot_values_arr = np.asarray(slot_values[node.node_id], dtype=np.float64)
+                    readout = float(np.sum(read_addr * slot_values_arr))
+                    readout = (1.0 - 0.5 * max(0.0, distractor_signal)) * readout
+                    next_outputs[node.node_id] = math.tanh(summed_input + readout)
+                    write_focus = abs(float(write_addr[0]) - float(write_addr[1]))
+                    read_focus = abs(float(read_addr[0]) - float(read_addr[1]))
+                    write_focus_vals.append(write_focus)
+                    read_focus_vals.append(read_focus)
+                    gap_vals.append(read_focus - write_focus)
+                    consistency_vals.append(1.0 - abs(write_focus - read_focus))
+                    concentration_vals.append(float(np.max(read_addr)))
+                    if step_role == "store":
+                        write_alignment_vals.append(write_focus * key_strength)
+                    if step_role == "query":
+                        read_alignment_vals.append(read_focus * key_strength)
+                    if step_role == "distractor":
+                        leak_vals.append(abs(readout))
+                outputs = next_outputs
+            sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
+
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+            mean_write_address_focus=float(np.mean(write_focus_vals)) if write_focus_vals else 0.0,
+            mean_read_address_focus=float(np.mean(read_focus_vals)) if read_focus_vals else 0.0,
+            write_read_address_gap=float(np.mean(gap_vals)) if gap_vals else 0.0,
+            slot_write_specialization=float(np.std(write_focus_vals)) if write_focus_vals else 0.0,
+            slot_read_specialization=float(np.std(read_focus_vals)) if read_focus_vals else 0.0,
+            address_consistency=float(np.mean(consistency_vals)) if consistency_vals else 0.0,
+            query_read_alignment=float(np.mean(read_alignment_vals)) if read_alignment_vals else 0.0,
+            store_write_alignment=float(np.mean(write_alignment_vals)) if write_alignment_vals else 0.0,
+            distractor_write_leak=float(np.mean(leak_vals)) if leak_vals else 0.0,
+            readout_address_concentration=float(np.mean(concentration_vals)) if concentration_vals else 0.0,
         )
         return np.vstack(sequence_outputs)
 
@@ -626,3 +1302,11 @@ def _role_mean(role_totals: dict[str, tuple[float, float, int]], role: str, *, i
     if index == 0:
         return total_fast / count
     return total_slow / count
+
+
+def _role_mean_4(role_totals: dict[str, tuple[float, float, float, int]], role: str, *, index: int) -> float:
+    first, second, third, count = role_totals.get(role, (0.0, 0.0, 0.0, 0))
+    if count <= 0:
+        return 0.0
+    values = (first, second, third)
+    return values[index] / count
