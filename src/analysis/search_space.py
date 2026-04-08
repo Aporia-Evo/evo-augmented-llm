@@ -271,6 +271,10 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
     mean_write_address_focus = _safe_mean([record.mean_write_address_focus for record in records])
     mean_read_address_focus = _safe_mean([record.mean_read_address_focus for record in records])
     mean_write_read_gap = _safe_mean([record.write_read_address_gap for record in records])
+    mean_query_read_alignment = _safe_mean([record.query_read_alignment for record in records])
+    mean_store_write_alignment = _safe_mean([record.store_write_alignment for record in records])
+    mean_distractor_write_leak = _safe_mean([record.distractor_write_leak for record in records])
+    mean_readout_address_concentration = _safe_mean([record.readout_address_concentration for record in records])
     mean_score_over_delays = _safe_mean([record.mean_score_over_delays for record in records])
     mean_delay_score_std = _safe_mean([record.delay_score_std for record in records])
     mean_delay_score_range = _safe_mean([record.delay_score_range for record in records])
@@ -398,6 +402,22 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
             hints.append("Explizites Read-Addressing wirkt schaerfer als Write-Addressing; Query greift selektiver zu als Stores schreiben.")
         elif mean_write_read_gap < 0.0:
             hints.append("Write-Addressing dominiert Read-Addressing; funktionale Trennung zwischen Schreiben und Lesen bleibt begrenzt.")
+        if mean_write_address_focus <= 0.02 and mean_read_address_focus <= 0.02:
+            hints.append("Slot-Adressierung bleibt weitgehend symmetrisch und diffus; Write/Read-Fokus kollabiert nahe Null.")
+        elif mean_write_address_focus >= 0.06 and mean_read_address_focus >= 0.06:
+            hints.append("Symmetriebruch greift: sowohl Schreib- als auch Lese-Adressierung zeigen messbaren Fokus.")
+        if abs(mean_readout_address_concentration - 0.5) <= 0.02:
+            hints.append("Readout-Konzentration bleibt nahe 0.5; der Pfad wirkt noch im symmetrischen Default gefangen.")
+        elif mean_readout_address_concentration >= 0.56:
+            hints.append("Readout adressiert klarer in einen Slot; Konzentration liegt sichtbar oberhalb der Symmetrie-Basis.")
+        if mean_write_read_gap >= 0.05:
+            hints.append("Lese- und Schreibadressierung entkoppeln sich sichtbar; Read-Fokus liegt systematisch ueber Write-Fokus.")
+        elif mean_write_read_gap <= -0.05:
+            hints.append("Schreibadressierung ist deutlich schaerfer als Leseadressierung; Query-Pfad bleibt noch zu flach.")
+        if mean_store_write_alignment >= 0.1 and mean_query_read_alignment >= 0.1:
+            hints.append("Store-Write- und Query-Read-Ausrichtung sind gleichzeitig messbar; Slot-Rollen werden funktionaler getrennt.")
+        if mean_distractor_write_leak >= 0.15:
+            hints.append("Distraktoren aktivieren weiterhin breite Schreibpfade; Leak im adressierten Slot-Mechanismus bleibt erhoeht.")
 
     if phase_one_records and phase_two_records:
         phase_one_score = _safe_mean([record.score_current_phase for record in phase_one_records])

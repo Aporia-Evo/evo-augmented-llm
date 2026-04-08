@@ -919,16 +919,48 @@ class StatefulV5AddressedSlotsNetworkExecutor(StatefulNetworkExecutor):
                     input_norm = summed_input / (1.0 + abs(summed_input))
                     write_signal = (node.content_w_key * input_norm) + (node.content_b_key * store_signal)
                     read_signal = (node.content_w_query * input_norm) + (node.content_b_query * query_signal)
-                    write_scale = max(0.5, abs(float(node.content_temperature)))
-                    read_scale = max(0.5, abs(float(node.content_temperature + node.content_b_match)))
-                    slot_write_keys = (1.0 + node.content_w_key, -1.0 - node.content_w_key)
-                    slot_read_keys = (1.0 + node.content_w_query, -1.0 - node.content_w_query)
+                    # V13b: deterministic, small asymmetry between slots so evolution can leave
+                    # the symmetric addressing fixed point.
+                    write_scale = max(0.6, abs(float(node.content_temperature)))
+                    read_scale = max(0.6, abs(float(node.content_temperature)) + (0.3 * abs(float(node.content_b_match))) + 0.1)
+                    slot_write_keys = (1.12 + node.content_w_key, -0.88 - node.content_w_key)
+                    slot_read_keys = (0.9 + node.content_w_query, -1.1 - node.content_w_query)
+                    slot_write_bias = (0.08, -0.08)
+                    slot_read_bias = (-0.05, 0.05)
+                    write_bias = node.content_b_key + (0.05 * store_signal)
+                    read_bias = node.content_b_match + (0.05 * query_signal)
                     write_addr = np.asarray(
-                        [1.0 / (1.0 + math.exp(-((write_scale * write_signal * slot_write_keys[s]) + node.content_b_key))) for s in range(slot_count)],
+                        [
+                            1.0
+                            / (
+                                1.0
+                                + math.exp(
+                                    -(
+                                        (write_scale * write_signal * slot_write_keys[s])
+                                        + write_bias
+                                        + slot_write_bias[s]
+                                    )
+                                )
+                            )
+                            for s in range(slot_count)
+                        ],
                         dtype=np.float64,
                     )
                     read_addr_raw = np.asarray(
-                        [1.0 / (1.0 + math.exp(-((read_scale * read_signal * slot_read_keys[s]) + node.content_b_match))) for s in range(slot_count)],
+                        [
+                            1.0
+                            / (
+                                1.0
+                                + math.exp(
+                                    -(
+                                        (read_scale * read_signal * slot_read_keys[s])
+                                        + read_bias
+                                        + slot_read_bias[s]
+                                    )
+                                )
+                            )
+                            for s in range(slot_count)
+                        ],
                         dtype=np.float64,
                     )
                     read_den = float(np.sum(read_addr_raw))
