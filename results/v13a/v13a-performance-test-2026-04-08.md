@@ -108,7 +108,7 @@ Addressed diagnostics (`stateful_v5_addressed_slots`):
 
 ## Artifacts
 
-- `results/v13a-perf-bit-memory-s1-5-g12-p40.md`
-- `results/v13a-perf-kv-trivial-s1-5-g12-p40.md`
-- `results/v13a-perf-kv-easy-s1-5-g12-p40.md`
-- `results/v13a-performance-test-2026-04-08.md`
+- `results/v13a/v13a-perf-bit-memory-s1-5-g12-p40.md`
+- `results/v13a/v13a-perf-kv-trivial-s1-5-g12-p40.md`
+- `results/v13a/v13a-perf-kv-easy-s1-5-g12-p40.md`
+- `results/v13a/v13a-performance-test-2026-04-08.md`

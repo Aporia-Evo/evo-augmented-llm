@@ -97,9 +97,9 @@ Addressed metrics (`stateful_v5_addressed_slots`):
 
 ## Artifacts
 
-- `results/v13a-addressed-bit-memory-guardrail.md`
+- `results/v13a/v13a-addressed-bit-memory-guardrail.md`
 - `results/v13a-addressed-bit-memory-guardrail.csv`
-- `results/v13a-addressed-kv-trivial.md`
+- `results/v13a/v13a-addressed-kv-trivial.md`
 - `results/v13a-addressed-kv-trivial.csv`
-- `results/v13a-addressed-kv-easy.md`
+- `results/v13a/v13a-addressed-kv-easy.md`
 - `results/v13a-addressed-kv-easy.csv`
