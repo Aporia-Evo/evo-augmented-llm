@@ -125,6 +125,17 @@ class PlasticityEpisodeMetrics:
     slot_query_focus: float = 0.0
     slot_readout_selectivity: float = 0.0
     slot_utilization: float = 0.0
+    query_slot_match_max: float = 0.0
+    slot_distractor_leak: float = 0.0
+    mean_write_address_focus: float = 0.0
+    mean_read_address_focus: float = 0.0
+    write_read_address_gap: float = 0.0
+    slot_write_specialization: float = 0.0
+    slot_read_specialization: float = 0.0
+    address_consistency: float = 0.0
+    query_read_alignment: float = 0.0
+    store_write_alignment: float = 0.0
+    readout_address_concentration: float = 0.0
 
 
 def _incoming_connections_by_target(genome: GenomeModel) -> dict[int, list[ConnectionGeneModel]]:
@@ -739,6 +750,8 @@ class StatefulV4SlotsNetworkExecutor(StatefulNetworkExecutor):
         write_focus_vals: list[float] = []
         query_focus_vals: list[float] = []
         readout_selectivity_vals: list[float] = []
+        query_slot_match_max_vals: list[float] = []
+        distractor_leak_vals: list[float] = []
         slot_key_sep_vals: list[float] = []
         slot_value_sep_vals: list[float] = []
         slot_hits = [0, 0]
@@ -749,6 +762,7 @@ class StatefulV4SlotsNetworkExecutor(StatefulNetworkExecutor):
             outputs.update(input_map)
             query_signal = float(inputs[1]) if len(inputs) > 1 else 0.0
             store_signal = float(inputs[0]) if len(inputs) > 0 else 0.0
+            distractor_signal = float(inputs[2]) if len(inputs) > 2 else 0.0
             key_bits = np.asarray([float(inputs[4]), float(inputs[5]), float(inputs[6])] if len(inputs) > 6 else [0.0, 0.0, 0.0])
             key_index = int(np.argmax(key_bits)) if float(np.sum(key_bits)) > 0.0 else 0
             active_slot = int(key_index % slot_count)
@@ -776,22 +790,45 @@ class StatefulV4SlotsNetworkExecutor(StatefulNetworkExecutor):
                             decay * slot_values[node.node_id][slot_index]
                             + (value_gate * store_signal * slot_mask * (summed_input + node.slow_output_gain))
                         )
-                    query_key = query_signal * input_norm
+                    query_key = query_signal * (0.5 + abs(input_norm))
+                    match_scale = max(0.5, float(node.content_temperature))
+                    match_bias = float(node.content_b_match)
                     logits = np.asarray(
-                        [node.content_temperature * query_key * slot_keys[node.node_id][slot_idx] for slot_idx in range(slot_count)],
+                        [
+                            (match_scale * query_key * slot_keys[node.node_id][slot_idx]) + match_bias
+                            for slot_idx in range(slot_count)
+                        ],
                         dtype=np.float64,
                     )
                     logits = logits - float(np.max(logits))
                     probs = np.exp(logits)
                     denom = float(np.sum(probs))
                     weights = probs / denom if denom > 0.0 else np.asarray([0.5, 0.5], dtype=np.float64)
-                    readout = float(np.sum(weights * np.asarray(slot_values[node.node_id], dtype=np.float64)))
+                    slot_values_arr = np.asarray(slot_values[node.node_id], dtype=np.float64)
+                    primary_readout = float(np.sum(weights * slot_values_arr))
+                    residual_readout = 0.5 * float(np.mean(slot_values_arr))
+                    dominant_match = float(np.max(weights))
+                    focus_gate = 1.0 / (
+                        1.0
+                        + math.exp(
+                            -(
+                                (2.0 * dominant_match)
+                                + (0.5 * match_scale)
+                                + (0.25 * node.content_b_query)
+                            )
+                        )
+                    )
+                    leak_suppress = max(0.2, 1.0 - (0.6 * max(0.0, distractor_signal)))
+                    readout = leak_suppress * ((focus_gate * primary_readout) + ((1.0 - focus_gate) * residual_readout))
                     next_outputs[node.node_id] = math.tanh(summed_input + readout)
                     if step_role == "store":
                         write_focus_vals.append(abs(slot_keys[node.node_id][0] - slot_keys[node.node_id][1]))
                     if step_role == "query":
                         query_focus_vals.append(abs(float(weights[0]) - float(weights[1])))
                         readout_selectivity_vals.append(abs(readout))
+                        query_slot_match_max_vals.append(float(np.max(weights)))
+                    if step_role == "distractor":
+                        distractor_leak_vals.append(abs(readout))
                     slot_key_sep_vals.append(abs(slot_keys[node.node_id][0] - slot_keys[node.node_id][1]))
                     slot_value_sep_vals.append(abs(slot_values[node.node_id][0] - slot_values[node.node_id][1]))
                 outputs = next_outputs
@@ -815,6 +852,132 @@ class StatefulV4SlotsNetworkExecutor(StatefulNetworkExecutor):
             slot_query_focus=float(np.mean(query_focus_vals)) if query_focus_vals else 0.0,
             slot_readout_selectivity=float(np.mean(readout_selectivity_vals)) if readout_selectivity_vals else 0.0,
             slot_utilization=max(utilization, min(slot_hits) / total_hits),
+            query_slot_match_max=float(np.mean(query_slot_match_max_vals)) if query_slot_match_max_vals else 0.0,
+            slot_distractor_leak=float(np.mean(distractor_leak_vals)) if distractor_leak_vals else 0.0,
+        )
+        return np.vstack(sequence_outputs)
+
+    def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
+        return self._last_metrics
+
+
+class StatefulV5AddressedSlotsNetworkExecutor(StatefulNetworkExecutor):
+    def __init__(self, activation_steps: int) -> None:
+        super().__init__(activation_steps=activation_steps)
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+        )
+
+    def run_sequence(
+        self,
+        genome: GenomeModel,
+        input_sequence: Sequence[Sequence[float]],
+        *,
+        step_roles: Sequence[str] | None = None,
+    ) -> np.ndarray:
+        incoming_by_target = _incoming_connections_by_target(genome)
+        slot_count = 2
+        slot_keys = {node.node_id: [0.0 for _ in range(slot_count)] for node in genome.nodes if not node.is_input}
+        slot_values = {node.node_id: [0.0 for _ in range(slot_count)] for node in genome.nodes if not node.is_input}
+        outputs = {node.node_id: 0.0 for node in genome.nodes}
+        sequence_outputs: list[np.ndarray] = []
+        write_focus_vals: list[float] = []
+        read_focus_vals: list[float] = []
+        gap_vals: list[float] = []
+        write_alignment_vals: list[float] = []
+        read_alignment_vals: list[float] = []
+        consistency_vals: list[float] = []
+        leak_vals: list[float] = []
+        concentration_vals: list[float] = []
+
+        for step_index, inputs in enumerate(input_sequence):
+            step_role = _step_role_at(step_roles, step_index)
+            input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
+            outputs.update(input_map)
+            store_signal = float(inputs[0]) if len(inputs) > 0 else 0.0
+            query_signal = float(inputs[1]) if len(inputs) > 1 else 0.0
+            distractor_signal = float(inputs[2]) if len(inputs) > 2 else 0.0
+            key_bits = np.asarray([float(inputs[4]), float(inputs[5]), float(inputs[6])] if len(inputs) > 6 else [0.0, 0.0, 0.0])
+            key_strength = float(np.max(key_bits)) if key_bits.size else 0.0
+            for _ in range(self.activation_steps):
+                previous_outputs = dict(outputs)
+                next_outputs = dict(input_map)
+                for node in genome.nodes:
+                    if node.is_input:
+                        continue
+                    summed_input = 0.0
+                    for conn in incoming_by_target.get(node.node_id, ()):
+                        summed_input += conn.weight * previous_outputs.get(conn.in_id, 0.0)
+                    input_norm = summed_input / (1.0 + abs(summed_input))
+                    write_signal = (node.content_w_key * input_norm) + (node.content_b_key * store_signal)
+                    read_signal = (node.content_w_query * input_norm) + (node.content_b_query * query_signal)
+                    write_scale = max(0.5, abs(float(node.content_temperature)))
+                    read_scale = max(0.5, abs(float(node.content_temperature + node.content_b_match)))
+                    slot_write_keys = (1.0 + node.content_w_key, -1.0 - node.content_w_key)
+                    slot_read_keys = (1.0 + node.content_w_query, -1.0 - node.content_w_query)
+                    write_addr = np.asarray(
+                        [1.0 / (1.0 + math.exp(-((write_scale * write_signal * slot_write_keys[s]) + node.content_b_key))) for s in range(slot_count)],
+                        dtype=np.float64,
+                    )
+                    read_addr_raw = np.asarray(
+                        [1.0 / (1.0 + math.exp(-((read_scale * read_signal * slot_read_keys[s]) + node.content_b_match))) for s in range(slot_count)],
+                        dtype=np.float64,
+                    )
+                    read_den = float(np.sum(read_addr_raw))
+                    read_addr = (read_addr_raw / read_den) if read_den > 0.0 else np.asarray([0.5, 0.5], dtype=np.float64)
+                    key_input = store_signal * input_norm
+                    value_input = store_signal * (summed_input + node.slow_output_gain)
+                    for s in range(slot_count):
+                        slot_keys[node.node_id][s] = (clamp_alpha(node.alpha) * slot_keys[node.node_id][s]) + (write_addr[s] * key_input)
+                        slot_values[node.node_id][s] = (clamp_alpha(node.alpha_slow) * slot_values[node.node_id][s]) + (write_addr[s] * value_input)
+                    slot_values_arr = np.asarray(slot_values[node.node_id], dtype=np.float64)
+                    readout = float(np.sum(read_addr * slot_values_arr))
+                    readout = (1.0 - 0.5 * max(0.0, distractor_signal)) * readout
+                    next_outputs[node.node_id] = math.tanh(summed_input + readout)
+                    write_focus = abs(float(write_addr[0]) - float(write_addr[1]))
+                    read_focus = abs(float(read_addr[0]) - float(read_addr[1]))
+                    write_focus_vals.append(write_focus)
+                    read_focus_vals.append(read_focus)
+                    gap_vals.append(read_focus - write_focus)
+                    consistency_vals.append(1.0 - abs(write_focus - read_focus))
+                    concentration_vals.append(float(np.max(read_addr)))
+                    if step_role == "store":
+                        write_alignment_vals.append(write_focus * key_strength)
+                    if step_role == "query":
+                        read_alignment_vals.append(read_focus * key_strength)
+                    if step_role == "distractor":
+                        leak_vals.append(abs(readout))
+                outputs = next_outputs
+            sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
+
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+            mean_write_address_focus=float(np.mean(write_focus_vals)) if write_focus_vals else 0.0,
+            mean_read_address_focus=float(np.mean(read_focus_vals)) if read_focus_vals else 0.0,
+            write_read_address_gap=float(np.mean(gap_vals)) if gap_vals else 0.0,
+            slot_write_specialization=float(np.std(write_focus_vals)) if write_focus_vals else 0.0,
+            slot_read_specialization=float(np.std(read_focus_vals)) if read_focus_vals else 0.0,
+            address_consistency=float(np.mean(consistency_vals)) if consistency_vals else 0.0,
+            query_read_alignment=float(np.mean(read_alignment_vals)) if read_alignment_vals else 0.0,
+            store_write_alignment=float(np.mean(write_alignment_vals)) if write_alignment_vals else 0.0,
+            distractor_write_leak=float(np.mean(leak_vals)) if leak_vals else 0.0,
+            readout_address_concentration=float(np.mean(concentration_vals)) if concentration_vals else 0.0,
         )
         return np.vstack(sequence_outputs)
 

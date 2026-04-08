@@ -22,6 +22,7 @@ from evolve.custom_neuron import (
     PlasticityEpisodeMetrics,
     StatefulNetworkExecutor,
     StatefulV4SlotsNetworkExecutor,
+    StatefulV5AddressedSlotsNetworkExecutor,
     StatefulV2GatedNetworkExecutor,
     StatefulV3KVNetworkExecutor,
     StatefulV2NetworkExecutor,
@@ -30,6 +31,7 @@ from evolve.genome_codec import GenomeModel
 from evolve.plasticity import (
     is_content_gated_variant,
     is_stateful_v4_slots_variant,
+    is_stateful_v5_addressed_slots_variant,
     is_stateful_v3_kv_variant,
     is_stateful_v2_gated_variant,
     is_stateful_v2_variant,
@@ -833,6 +835,8 @@ def _build_executor(
         return StatefulV3KVNetworkExecutor(activation_steps=activation_steps)
     if is_stateful_v4_slots_variant(variant):
         return StatefulV4SlotsNetworkExecutor(activation_steps=activation_steps)
+    if is_stateful_v5_addressed_slots_variant(variant):
+        return StatefulV5AddressedSlotsNetworkExecutor(activation_steps=activation_steps)
     plastic_mode = plastic_mode_for_variant(variant)
     if plastic_mode == "hebb":
         return PlasticNetworkExecutor(
@@ -913,6 +917,17 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
             "slot_query_focus": 0.0,
             "slot_readout_selectivity": 0.0,
             "slot_utilization": 0.0,
+            "query_slot_match_max": 0.0,
+            "slot_distractor_leak": 0.0,
+            "mean_write_address_focus": 0.0,
+            "mean_read_address_focus": 0.0,
+            "write_read_address_gap": 0.0,
+            "slot_write_specialization": 0.0,
+            "slot_read_specialization": 0.0,
+            "address_consistency": 0.0,
+            "query_read_alignment": 0.0,
+            "store_write_alignment": 0.0,
+            "readout_address_concentration": 0.0,
         }
     return {
         "plasticity_enabled": metrics.plasticity_enabled,
@@ -978,6 +993,17 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
         "slot_query_focus": metrics.slot_query_focus,
         "slot_readout_selectivity": metrics.slot_readout_selectivity,
         "slot_utilization": metrics.slot_utilization,
+        "query_slot_match_max": metrics.query_slot_match_max,
+        "slot_distractor_leak": metrics.slot_distractor_leak,
+        "mean_write_address_focus": metrics.mean_write_address_focus,
+        "mean_read_address_focus": metrics.mean_read_address_focus,
+        "write_read_address_gap": metrics.write_read_address_gap,
+        "slot_write_specialization": metrics.slot_write_specialization,
+        "slot_read_specialization": metrics.slot_read_specialization,
+        "address_consistency": metrics.address_consistency,
+        "query_read_alignment": metrics.query_read_alignment,
+        "store_write_alignment": metrics.store_write_alignment,
+        "readout_address_concentration": metrics.readout_address_concentration,
     }
 
 
@@ -1075,6 +1101,17 @@ def _aggregate_episode_metrics(metrics: Sequence[PlasticityEpisodeMetrics]) -> P
         slot_query_focus=float(np.mean([metric.slot_query_focus for metric in metrics])),
         slot_readout_selectivity=float(np.mean([metric.slot_readout_selectivity for metric in metrics])),
         slot_utilization=float(np.mean([metric.slot_utilization for metric in metrics])),
+        query_slot_match_max=float(np.mean([metric.query_slot_match_max for metric in metrics])),
+        slot_distractor_leak=float(np.mean([metric.slot_distractor_leak for metric in metrics])),
+        mean_write_address_focus=float(np.mean([metric.mean_write_address_focus for metric in metrics])),
+        mean_read_address_focus=float(np.mean([metric.mean_read_address_focus for metric in metrics])),
+        write_read_address_gap=float(np.mean([metric.write_read_address_gap for metric in metrics])),
+        slot_write_specialization=float(np.mean([metric.slot_write_specialization for metric in metrics])),
+        slot_read_specialization=float(np.mean([metric.slot_read_specialization for metric in metrics])),
+        address_consistency=float(np.mean([metric.address_consistency for metric in metrics])),
+        query_read_alignment=float(np.mean([metric.query_read_alignment for metric in metrics])),
+        store_write_alignment=float(np.mean([metric.store_write_alignment for metric in metrics])),
+        readout_address_concentration=float(np.mean([metric.readout_address_concentration for metric in metrics])),
     )
 
 

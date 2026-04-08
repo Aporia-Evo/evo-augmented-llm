@@ -31,6 +31,7 @@ QD_PROFILE_GATING_MECHANISM = "gating_mechanism"
 QD_PROFILE_CONTENT_RETRIEVAL = "content_retrieval"
 QD_PROFILE_KV_RETRIEVAL_MECHANISM = "kv_retrieval_mechanism"
 QD_PROFILE_SLOT_RETRIEVAL_MECHANISM = "slot_retrieval_mechanism"
+QD_PROFILE_ADDRESSED_SLOT_MECHANISM = "addressed_slot_mechanism"
 DEFAULT_QD_PROFILE = QD_PROFILE_MECHANISM_V2
 
 ARCHIVE_DESCRIPTOR_VERSION_MECHANISM_V2 = "v7a-qdlight-v1"
@@ -43,6 +44,7 @@ ARCHIVE_DESCRIPTOR_VERSION_GATING_MECHANISM = "v10a-gating-v1"
 ARCHIVE_DESCRIPTOR_VERSION_CONTENT_RETRIEVAL = "v10c-content-v1"
 ARCHIVE_DESCRIPTOR_VERSION_KV_RETRIEVAL_MECHANISM = "v11b-kv-v1"
 ARCHIVE_DESCRIPTOR_VERSION_SLOT_RETRIEVAL_MECHANISM = "v12a-slots-v1"
+ARCHIVE_DESCRIPTOR_VERSION_ADDRESSED_SLOT_MECHANISM = "v13a-addressed-v1"
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,7 @@ def build_archive_cell(
         slot_write_focus=feature_record.slot_write_focus,
         slot_query_focus=feature_record.slot_query_focus,
         slot_utilization=feature_record.slot_utilization,
+        mean_read_address_focus=feature_record.mean_read_address_focus,
         curriculum_enabled=feature_record.curriculum_enabled,
         curriculum_phase_1_delays=feature_record.curriculum_phase_1_delays,
         curriculum_phase_2_delays=feature_record.curriculum_phase_2_delays,
@@ -159,6 +162,7 @@ def build_archive_descriptor(
     slot_write_focus: float = 0.0,
     slot_query_focus: float = 0.0,
     slot_utilization: float = 0.0,
+    mean_read_address_focus: float = 0.0,
     curriculum_enabled: bool = False,
     curriculum_phase_1_delays: str = "",
     curriculum_phase_2_delays: str = "",
@@ -197,6 +201,8 @@ def build_archive_descriptor(
         builder_kwargs["slot_write_focus"] = slot_write_focus
         builder_kwargs["slot_query_focus"] = slot_query_focus
         builder_kwargs["slot_utilization"] = slot_utilization
+    if qd_profile == QD_PROFILE_ADDRESSED_SLOT_MECHANISM:
+        builder_kwargs["mean_read_address_focus"] = mean_read_address_focus
     return profile.builder(**builder_kwargs)
 
 
@@ -206,7 +212,7 @@ def archive_profile_names(*, task_name: str | None = None) -> tuple[str, ...]:
         profile_names = [
             profile_name
             for profile_name in profile_names
-            if profile_name not in {QD_PROFILE_RETRIEVAL_STRATEGY, QD_PROFILE_RETRIEVAL_MECHANISM, QD_PROFILE_GATING_MECHANISM, QD_PROFILE_CONTENT_RETRIEVAL, QD_PROFILE_KV_RETRIEVAL_MECHANISM, QD_PROFILE_SLOT_RETRIEVAL_MECHANISM}
+            if profile_name not in {QD_PROFILE_RETRIEVAL_STRATEGY, QD_PROFILE_RETRIEVAL_MECHANISM, QD_PROFILE_GATING_MECHANISM, QD_PROFILE_CONTENT_RETRIEVAL, QD_PROFILE_KV_RETRIEVAL_MECHANISM, QD_PROFILE_SLOT_RETRIEVAL_MECHANISM, QD_PROFILE_ADDRESSED_SLOT_MECHANISM}
         ]
     return tuple(profile_names)
 
@@ -845,6 +851,61 @@ def _build_slot_retrieval_mechanism_descriptor(
     )
 
 
+def _build_addressed_slot_mechanism_descriptor(
+    *,
+    final_max_score: float,
+    score_ceiling: float,
+    mean_score_over_delays: float | None,
+    delay_score_std: float,
+    slow_fast_contribution_ratio: float,
+    enabled_conn_count: int,
+    retrieval_score: float,
+    query_accuracy: float,
+    relevant_token_retention: float,
+    distractor_suppression_ratio: float,
+    slow_query_coupling: float,
+    gate_selectivity: float,
+    match_selectivity: float,
+    query_key_alignment: float,
+    mean_read_address_focus: float,
+    curriculum_enabled: bool,
+    curriculum_phase_1_delays: str,
+    curriculum_phase_2_delays: str,
+    curriculum_switch_generation: int,
+    curriculum_phase: str,
+    active_evaluation_delays: str,
+) -> ArchiveDescriptor:
+    del mean_score_over_delays, delay_score_std, slow_fast_contribution_ratio, enabled_conn_count
+    del retrieval_score, query_accuracy, relevant_token_retention, distractor_suppression_ratio, slow_query_coupling
+    del gate_selectivity, match_selectivity, query_key_alignment, curriculum_enabled, curriculum_phase_1_delays, curriculum_phase_2_delays, curriculum_switch_generation, curriculum_phase, active_evaluation_delays
+    normalized_score, score_bin, safe_score_ceiling = _normalized_score(final_max_score, score_ceiling)
+    read_focus = max(0.0, min(1.0, float(mean_read_address_focus)))
+    read_focus_bin = _bin_value(read_focus, upper_bound=1.0, bin_count=8)
+    descriptor_values_json = stable_json_dumps(
+        {
+            "qd_profile": QD_PROFILE_ADDRESSED_SLOT_MECHANISM,
+            "descriptor_schema_version": ARCHIVE_DESCRIPTOR_VERSION_ADDRESSED_SLOT_MECHANISM,
+            "score_value": round(float(final_max_score), 10),
+            "score_ceiling": round(safe_score_ceiling, 10),
+            "normalized_score": round(normalized_score, 10),
+            "score_bin": score_bin,
+            "score_bin_count": ARCHIVE_SCORE_BINS,
+            "mean_read_address_focus": round(read_focus, 10),
+            "mean_read_address_focus_bin": read_focus_bin,
+            "mean_read_address_focus_bin_count": 8,
+        }
+    )
+    descriptor_key = f"scorebin_{score_bin}|readfocusbin_{read_focus_bin}"
+    return ArchiveDescriptor(
+        qd_profile=QD_PROFILE_ADDRESSED_SLOT_MECHANISM,
+        descriptor_schema_version=ARCHIVE_DESCRIPTOR_VERSION_ADDRESSED_SLOT_MECHANISM,
+        descriptor_key=descriptor_key,
+        descriptor_values_json=descriptor_values_json,
+        score_bin=score_bin,
+        secondary_bin=read_focus_bin,
+    )
+
+
 def _normalized_score(final_max_score: float, score_ceiling: float) -> tuple[float, int, float]:
     safe_score_ceiling = max(float(score_ceiling), 1e-6)
     normalized_score = max(0.0, min(1.0, float(final_max_score) / safe_score_ceiling))
@@ -971,5 +1032,15 @@ ARCHIVE_PROFILES: dict[str, ArchiveProfileDefinition] = {
         secondary_axis_bin_count=8,
         total_cells_per_delay=ARCHIVE_SCORE_BINS * 8,
         builder=_build_slot_retrieval_mechanism_descriptor,
+    ),
+    QD_PROFILE_ADDRESSED_SLOT_MECHANISM: ArchiveProfileDefinition(
+        name=QD_PROFILE_ADDRESSED_SLOT_MECHANISM,
+        descriptor_schema_version=ARCHIVE_DESCRIPTOR_VERSION_ADDRESSED_SLOT_MECHANISM,
+        secondary_axis_label="mean_read_address_focus",
+        secondary_axis_value_key="mean_read_address_focus",
+        secondary_axis_bin_key="mean_read_address_focus_bin",
+        secondary_axis_bin_count=8,
+        total_cells_per_delay=ARCHIVE_SCORE_BINS * 8,
+        builder=_build_addressed_slot_mechanism_descriptor,
     ),
 }

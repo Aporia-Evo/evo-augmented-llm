@@ -195,6 +195,17 @@ def extract_candidate_features(
         slot_query_focus=_coerce_float(metrics.get("slot_query_focus")),
         slot_readout_selectivity=_coerce_float(metrics.get("slot_readout_selectivity")),
         slot_utilization=_coerce_float(metrics.get("slot_utilization")),
+        query_slot_match_max=_coerce_float(metrics.get("query_slot_match_max")),
+        slot_distractor_leak=_coerce_float(metrics.get("slot_distractor_leak")),
+        mean_write_address_focus=_coerce_float(metrics.get("mean_write_address_focus")),
+        mean_read_address_focus=_coerce_float(metrics.get("mean_read_address_focus")),
+        write_read_address_gap=_coerce_float(metrics.get("write_read_address_gap")),
+        slot_write_specialization=_coerce_float(metrics.get("slot_write_specialization")),
+        slot_read_specialization=_coerce_float(metrics.get("slot_read_specialization")),
+        address_consistency=_coerce_float(metrics.get("address_consistency")),
+        query_read_alignment=_coerce_float(metrics.get("query_read_alignment")),
+        store_write_alignment=_coerce_float(metrics.get("store_write_alignment")),
+        readout_address_concentration=_coerce_float(metrics.get("readout_address_concentration")),
     )
     vector = _feature_vector_from_record(feature)
     return feature, vector
@@ -302,6 +313,17 @@ def _feature_vector_from_record(record: CandidateFeatureRecord) -> CandidateFeat
         record.slot_query_focus,
         record.slot_readout_selectivity,
         record.slot_utilization,
+        record.query_slot_match_max,
+        record.slot_distractor_leak,
+        record.mean_write_address_focus,
+        record.mean_read_address_focus,
+        record.write_read_address_gap,
+        record.slot_write_specialization,
+        record.slot_read_specialization,
+        record.address_consistency,
+        record.query_read_alignment,
+        record.store_write_alignment,
+        record.readout_address_concentration,
     ]
     array = np.asarray(vector, dtype=np.float64)
     norm_l2 = float(np.linalg.norm(array))

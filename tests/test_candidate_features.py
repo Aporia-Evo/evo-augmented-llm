@@ -197,6 +197,8 @@ def test_extract_candidate_features_captures_retrieval_metrics() -> None:
         "slot_query_focus": 0.53,
         "slot_readout_selectivity": 0.26,
         "slot_utilization": 1.0,
+        "query_slot_match_max": 0.91,
+        "slot_distractor_leak": 0.08,
     }
 
     feature, _vector = extract_candidate_features(genome, raw_metrics, context)
@@ -232,6 +234,8 @@ def test_extract_candidate_features_captures_retrieval_metrics() -> None:
     assert feature.slot_write_focus == 0.41
     assert feature.slot_query_focus == 0.53
     assert feature.slot_utilization == 1.0
+    assert feature.query_slot_match_max == 0.91
+    assert feature.slot_distractor_leak == 0.08
 
 
 def test_in_memory_repository_stores_feature_values_and_hof_flag() -> None:
