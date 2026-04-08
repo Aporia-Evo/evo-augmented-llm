@@ -289,6 +289,8 @@ def test_stateful_v4_slots_reports_slot_metrics() -> None:
     assert metrics.slot_value_separation >= 0.0
     assert metrics.slot_query_focus >= 0.0
     assert metrics.slot_utilization > 0.0
+    assert metrics.query_slot_match_max >= 0.5
+    assert metrics.slot_distractor_leak >= 0.0
 
 
 def _single_connection_genome(

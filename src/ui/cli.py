@@ -63,6 +63,7 @@ VARIANT_CHOICES = [
     "stateful_v2_gated",
     "stateful_v3_kv",
     "stateful_v4_slots",
+    "stateful_v5_addressed_slots",
     "content_gated",
     "stateless",
     "stateful_plastic",
@@ -164,6 +165,12 @@ class GenerationBenchmarkRow:
     slot_query_focus: float | None = None
     slot_readout_selectivity: float | None = None
     slot_utilization: float | None = None
+    query_slot_match_max: float | None = None
+    slot_distractor_leak: float | None = None
+    mean_write_address_focus: float | None = None
+    mean_read_address_focus: float | None = None
+    write_read_address_gap: float | None = None
+    readout_address_concentration: float | None = None
 
 
 @dataclass(frozen=True)
@@ -199,6 +206,12 @@ class GenerationSuiteAggregate:
     mean_slot_query_focus: float | None = None
     mean_slot_readout_selectivity: float | None = None
     mean_slot_utilization: float | None = None
+    mean_query_slot_match_max: float | None = None
+    mean_slot_distractor_leak: float | None = None
+    mean_write_address_focus: float | None = None
+    mean_read_address_focus: float | None = None
+    mean_write_read_address_gap: float | None = None
+    mean_readout_address_concentration: float | None = None
 
 
 class CliObserver:
@@ -486,7 +499,7 @@ def build_parser() -> argparse.ArgumentParser:
     curriculum_compare_parser.add_argument("--task", choices=TASK_CHOICES, default="bit_memory")
     curriculum_compare_parser.add_argument(
         "--variants",
-        default="stateful,stateful_v2,stateful_v2_gated,stateful_v3_kv,stateful_v4_slots,content_gated,stateful_plastic_hebb",
+        default="stateful,stateful_v2,stateful_v2_gated,stateful_v3_kv,stateful_v4_slots,stateful_v5_addressed_slots,content_gated,stateful_plastic_hebb",
         help="Comma-separated variants to include in the comparison report.",
     )
     curriculum_compare_parser.add_argument(
@@ -1216,6 +1229,12 @@ def _build_generation_benchmark_row(
         slot_query_focus=_coerce_optional_metric(best_candidate_metrics.get("slot_query_focus")),
         slot_readout_selectivity=_coerce_optional_metric(best_candidate_metrics.get("slot_readout_selectivity")),
         slot_utilization=_coerce_optional_metric(best_candidate_metrics.get("slot_utilization")),
+        query_slot_match_max=_coerce_optional_metric(best_candidate_metrics.get("query_slot_match_max")),
+        slot_distractor_leak=_coerce_optional_metric(best_candidate_metrics.get("slot_distractor_leak")),
+        mean_write_address_focus=_coerce_optional_metric(best_candidate_metrics.get("mean_write_address_focus")),
+        mean_read_address_focus=_coerce_optional_metric(best_candidate_metrics.get("mean_read_address_focus")),
+        write_read_address_gap=_coerce_optional_metric(best_candidate_metrics.get("write_read_address_gap")),
+        readout_address_concentration=_coerce_optional_metric(best_candidate_metrics.get("readout_address_concentration")),
     )
 
 
@@ -1351,6 +1370,24 @@ def _build_generation_suite_aggregates(rows: list[GenerationBenchmarkRow]) -> li
             float(row.slot_readout_selectivity) for row in grouped_rows if row.slot_readout_selectivity is not None
         ]
         slot_utilization_values = [float(row.slot_utilization) for row in grouped_rows if row.slot_utilization is not None]
+        query_slot_match_max_values = [
+            float(row.query_slot_match_max) for row in grouped_rows if row.query_slot_match_max is not None
+        ]
+        slot_distractor_leak_values = [
+            float(row.slot_distractor_leak) for row in grouped_rows if row.slot_distractor_leak is not None
+        ]
+        write_address_focus_values = [
+            float(row.mean_write_address_focus) for row in grouped_rows if row.mean_write_address_focus is not None
+        ]
+        read_address_focus_values = [
+            float(row.mean_read_address_focus) for row in grouped_rows if row.mean_read_address_focus is not None
+        ]
+        write_read_gap_values = [
+            float(row.write_read_address_gap) for row in grouped_rows if row.write_read_address_gap is not None
+        ]
+        readout_concentration_values = [
+            float(row.readout_address_concentration) for row in grouped_rows if row.readout_address_concentration is not None
+        ]
         aggregates.append(
             GenerationSuiteAggregate(
                 task_name=task_name,
@@ -1436,6 +1473,36 @@ def _build_generation_suite_aggregates(rows: list[GenerationBenchmarkRow]) -> li
                     if slot_utilization_values
                     else None
                 ),
+                mean_query_slot_match_max=(
+                    (sum(query_slot_match_max_values) / len(query_slot_match_max_values))
+                    if query_slot_match_max_values
+                    else None
+                ),
+                mean_slot_distractor_leak=(
+                    (sum(slot_distractor_leak_values) / len(slot_distractor_leak_values))
+                    if slot_distractor_leak_values
+                    else None
+                ),
+                mean_write_address_focus=(
+                    (sum(write_address_focus_values) / len(write_address_focus_values))
+                    if write_address_focus_values
+                    else None
+                ),
+                mean_read_address_focus=(
+                    (sum(read_address_focus_values) / len(read_address_focus_values))
+                    if read_address_focus_values
+                    else None
+                ),
+                mean_write_read_address_gap=(
+                    (sum(write_read_gap_values) / len(write_read_gap_values))
+                    if write_read_gap_values
+                    else None
+                ),
+                mean_readout_address_concentration=(
+                    (sum(readout_concentration_values) / len(readout_concentration_values))
+                    if readout_concentration_values
+                    else None
+                ),
             )
         )
     return aggregates
@@ -1495,6 +1562,12 @@ def _write_generation_suite_exports(
                 "mean_slot_query_focus",
                 "mean_slot_readout_selectivity",
                 "mean_slot_utilization",
+                "mean_query_slot_match_max",
+                "mean_slot_distractor_leak",
+                "mean_write_address_focus",
+                "mean_read_address_focus",
+                "mean_write_read_address_gap",
+                "mean_readout_address_concentration",
             ],
         )
         writer.writeheader()
@@ -1715,14 +1788,16 @@ def _render_generation_suite_markdown(
             aggregate.mean_slot_write_focus is not None
             or aggregate.mean_slot_query_focus is not None
             or aggregate.mean_slot_readout_selectivity is not None
+            or aggregate.mean_query_slot_match_max is not None
+            or aggregate.mean_read_address_focus is not None
             for aggregate in retrieval_diagnostic_aggregates
         ):
             sections.extend(
                 [
                     "## Slot Retrieval Diagnostics",
                     "",
-                    "| task | delay | variant | mean_slot_write_focus | mean_slot_query_focus | mean_slot_readout_selectivity | mean_slot_utilization |",
-                    "| --- | --- | --- | --- | --- | --- | --- |",
+                    "| task | delay | variant | mean_slot_write_focus | mean_slot_query_focus | mean_slot_readout_selectivity | mean_slot_utilization | mean_query_slot_match_max | mean_slot_distractor_leak | mean_write_address_focus | mean_read_address_focus | mean_write_read_address_gap | mean_readout_address_concentration |",
+                    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
                 ]
             )
             sections.extend(
@@ -1737,6 +1812,12 @@ def _render_generation_suite_markdown(
                             _format_optional_float(aggregate.mean_slot_query_focus, precision=3),
                             _format_optional_float(aggregate.mean_slot_readout_selectivity, precision=3),
                             _format_optional_float(aggregate.mean_slot_utilization, precision=3),
+                            _format_optional_float(aggregate.mean_query_slot_match_max, precision=3),
+                            _format_optional_float(aggregate.mean_slot_distractor_leak, precision=3),
+                            _format_optional_float(aggregate.mean_write_address_focus, precision=3),
+                            _format_optional_float(aggregate.mean_read_address_focus, precision=3),
+                            _format_optional_float(aggregate.mean_write_read_address_gap, precision=3),
+                            _format_optional_float(aggregate.mean_readout_address_concentration, precision=3),
                         ]
                     )
                     + " |"

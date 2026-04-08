@@ -40,6 +40,17 @@ SUMMARY_FEATURES = [
     "slot_query_focus",
     "slot_readout_selectivity",
     "slot_utilization",
+    "query_slot_match_max",
+    "slot_distractor_leak",
+    "mean_write_address_focus",
+    "mean_read_address_focus",
+    "write_read_address_gap",
+    "slot_write_specialization",
+    "slot_read_specialization",
+    "address_consistency",
+    "query_read_alignment",
+    "store_write_alignment",
+    "readout_address_concentration",
     "mean_eta",
     "mean_plastic_d",
     "plastic_d_at_lower_bound_fraction",
@@ -255,6 +266,11 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
     mean_slot_write_focus = _safe_mean([record.slot_write_focus for record in records])
     mean_slot_query_focus = _safe_mean([record.slot_query_focus for record in records])
     mean_slot_utilization = _safe_mean([record.slot_utilization for record in records])
+    mean_query_slot_match_max = _safe_mean([record.query_slot_match_max for record in records])
+    mean_slot_distractor_leak = _safe_mean([record.slot_distractor_leak for record in records])
+    mean_write_address_focus = _safe_mean([record.mean_write_address_focus for record in records])
+    mean_read_address_focus = _safe_mean([record.mean_read_address_focus for record in records])
+    mean_write_read_gap = _safe_mean([record.write_read_address_gap for record in records])
     mean_score_over_delays = _safe_mean([record.mean_score_over_delays for record in records])
     mean_delay_score_std = _safe_mean([record.delay_score_std for record in records])
     mean_delay_score_range = _safe_mean([record.delay_score_range for record in records])
@@ -372,6 +388,16 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
             hints.append("Slot-Nutzung ist unausgewogen; mindestens ein Slot bleibt oft ungenutzt und begrenzt die Retrieval-Kapazitaet.")
         else:
             hints.append("Slot-Pfad ist aktiv, aber Fokus bleibt weich; die Slot-Entscheidung ist noch nicht deutlich genug separiert.")
+        if mean_query_slot_match_max <= 0.55:
+            hints.append("Query fokussiert Slots noch zu schwach; kein klar dominanter Match-Slot waehrend der Query.")
+        elif mean_slot_distractor_leak >= 0.2:
+            hints.append("Query-Fokus steigt, aber Distraktor-Leak im Slot-Readout bleibt erhoeht.")
+        else:
+            hints.append("Query-Fokus und Slot-Readout wirken gemeinsam schaerfer bei begrenztem Distraktor-Leak.")
+        if mean_read_address_focus > mean_write_address_focus + 0.05:
+            hints.append("Explizites Read-Addressing wirkt schaerfer als Write-Addressing; Query greift selektiver zu als Stores schreiben.")
+        elif mean_write_read_gap < 0.0:
+            hints.append("Write-Addressing dominiert Read-Addressing; funktionale Trennung zwischen Schreiben und Lesen bleibt begrenzt.")
 
     if phase_one_records and phase_two_records:
         phase_one_score = _safe_mean([record.score_current_phase for record in phase_one_records])

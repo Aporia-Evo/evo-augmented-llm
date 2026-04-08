@@ -189,3 +189,69 @@ def test_v11d_kv_conservative_plus_overlay_loads() -> None:
     assert v11d.mutation.content_w_query_mutate_power < base.mutation.content_w_query_mutate_power
     assert v11d.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
     assert v11d.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+
+
+def test_v12b_slots_querysharp_overlay_loads_and_is_targeted() -> None:
+    base = load_config(["configs/base.yaml"])
+    querysharp = load_config(["configs/base.yaml", "configs/v12b_slots_querysharp.yaml"])
+
+    assert querysharp.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
+    assert querysharp.mutation.content_w_query_init_max > base.mutation.content_w_query_init_max
+    assert querysharp.mutation.content_mutate_rate > base.mutation.content_mutate_rate
+    assert querysharp.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+    assert querysharp.run.variant == base.run.variant
+
+
+def test_v12b_slots_readoutsharp_overlay_loads_and_is_targeted() -> None:
+    base = load_config(["configs/base.yaml"])
+    readoutsharp = load_config(["configs/base.yaml", "configs/v12b_slots_readoutsharp.yaml"])
+
+    assert readoutsharp.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
+    assert readoutsharp.mutation.content_b_query_mutate_power < base.mutation.content_b_query_mutate_power
+    assert readoutsharp.mutation.content_mutate_rate < base.mutation.content_mutate_rate
+    assert readoutsharp.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+    assert readoutsharp.run.variant == base.run.variant
+
+
+def test_v12c_slots_readoutplus_overlay_loads_and_is_targeted() -> None:
+    base = load_config(["configs/base.yaml"])
+    readoutplus = load_config(["configs/base.yaml", "configs/v12c_slots_readoutplus.yaml"])
+
+    assert readoutplus.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
+    assert readoutplus.mutation.content_b_query_mutate_power < base.mutation.content_b_query_mutate_power
+    assert readoutplus.mutation.content_mutate_rate < base.mutation.content_mutate_rate
+    assert readoutplus.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+    assert readoutplus.run.variant == base.run.variant
+
+
+def test_v12c_slots_focusplus_overlay_loads_and_is_targeted() -> None:
+    base = load_config(["configs/base.yaml"])
+    focusplus = load_config(["configs/base.yaml", "configs/v12c_slots_focusplus.yaml"])
+
+    assert focusplus.mutation.content_w_query_init_max > base.mutation.content_w_query_init_max
+    assert focusplus.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
+    assert focusplus.mutation.content_mutate_rate < base.mutation.content_mutate_rate
+    assert focusplus.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+    assert focusplus.run.variant == base.run.variant
+
+
+def test_v12d_slots_conservative_plus_overlay_loads_and_is_targeted() -> None:
+    base = load_config(["configs/base.yaml"])
+    conservative_plus = load_config(["configs/base.yaml", "configs/v12d_slots_conservative_plus.yaml"])
+
+    assert conservative_plus.mutation.content_w_query_mutate_power < base.mutation.content_w_query_mutate_power
+    assert conservative_plus.mutation.content_temperature_mutate_power < base.mutation.content_temperature_mutate_power
+    assert conservative_plus.mutation.content_mutate_rate < base.mutation.content_mutate_rate
+    assert conservative_plus.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+    assert conservative_plus.run.variant == base.run.variant
+
+
+def test_v12d_slots_margin_plus_overlay_loads_and_is_targeted() -> None:
+    base = load_config(["configs/base.yaml"])
+    margin_plus = load_config(["configs/base.yaml", "configs/v12d_slots_margin_plus.yaml"])
+
+    assert margin_plus.mutation.content_b_match_init_max > base.mutation.content_b_match_init_max
+    assert margin_plus.mutation.content_temperature_init_min > base.mutation.content_temperature_init_min
+    assert margin_plus.mutation.content_mutate_rate < base.mutation.content_mutate_rate
+    assert margin_plus.mutation.weight_mutate_power == base.mutation.weight_mutate_power
+    assert margin_plus.run.variant == base.run.variant

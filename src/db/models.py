@@ -293,6 +293,17 @@ class CandidateFeatureRecord:
     slot_query_focus: float = 0.0
     slot_readout_selectivity: float = 0.0
     slot_utilization: float = 0.0
+    query_slot_match_max: float = 0.0
+    slot_distractor_leak: float = 0.0
+    mean_write_address_focus: float = 0.0
+    mean_read_address_focus: float = 0.0
+    write_read_address_gap: float = 0.0
+    slot_write_specialization: float = 0.0
+    slot_read_specialization: float = 0.0
+    address_consistency: float = 0.0
+    query_read_alignment: float = 0.0
+    store_write_alignment: float = 0.0
+    readout_address_concentration: float = 0.0
 
 
 @dataclass(frozen=True)

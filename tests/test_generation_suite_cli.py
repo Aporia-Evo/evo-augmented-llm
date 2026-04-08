@@ -362,12 +362,16 @@ def test_benchmark_suite_key_value_memory_supports_profile_overrides(tmp_path: P
         "gating_mechanism",
         "content_retrieval",
         "kv_retrieval_mechanism",
+        "slot_retrieval_mechanism",
+        "addressed_slot_mechanism",
     }
     markdown = (tmp_path / "kv-suite.md").read_text(encoding="utf-8")
     assert "## Retrieval Diagnostics" in markdown
     assert "mean_correct_key_selected" in markdown
     assert "## KV Selectivity Diagnostics" in markdown
     assert "mean_store_vs_distractor_write_gap" in markdown
+    assert "## Slot Retrieval Diagnostics" in markdown
+    assert "mean_query_slot_match_max" in markdown
     feature_rows = [
         json.loads(line)
         for line in (tmp_path / "kv-suite.candidate-features.jsonl").read_text(encoding="utf-8").splitlines()
@@ -433,3 +437,177 @@ def test_benchmark_suite_supports_v11d_kv_preset_overlay(tmp_path: Path) -> None
     assert exit_code == 0
     markdown = (tmp_path / "kv-v11d-conservative-plus-smoke.md").read_text(encoding="utf-8")
     assert "stateful_v3_kv" in markdown
+
+
+def test_benchmark_suite_supports_v12b_slots_querysharp_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v4_slots",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v12b_slots_querysharp.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v12b-querysharp-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v12b-querysharp-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v4_slots" in markdown
+
+
+def test_benchmark_suite_supports_v12b_slots_readoutsharp_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v4_slots",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v12b_slots_readoutsharp.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v12b-readoutsharp-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v12b-readoutsharp-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v4_slots" in markdown
+
+
+def test_benchmark_suite_supports_v12c_slots_readoutplus_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v4_slots",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v12c_slots_readoutplus.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v12c-readoutplus-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v12c-readoutplus-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v4_slots" in markdown
+
+
+def test_benchmark_suite_supports_v12c_slots_focusplus_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v4_slots",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v12c_slots_focusplus.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v12c-focusplus-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v12c-focusplus-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v4_slots" in markdown
+
+
+def test_benchmark_suite_supports_v12d_slots_conservative_plus_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v4_slots",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v12d_slots_conservative_plus.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v12d-conservative-plus-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v12d-conservative-plus-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v4_slots" in markdown
+
+
+def test_benchmark_suite_supports_v12d_slots_margin_plus_overlay(tmp_path: Path) -> None:
+    exit_code = main(
+        [
+            "benchmark-suite",
+            "--store",
+            "memory",
+            "--tasks",
+            "key_value_memory",
+            "--seeds",
+            "7",
+            "--variants",
+            "stateful_v4_slots",
+            "--generations",
+            "1",
+            "--population-size",
+            "4",
+            "--config",
+            "configs/v12d_slots_margin_plus.yaml",
+            "--output-dir",
+            str(tmp_path),
+            "--label",
+            "kv-v12d-margin-plus-smoke",
+        ]
+    )
+    assert exit_code == 0
+    markdown = (tmp_path / "kv-v12d-margin-plus-smoke.md").read_text(encoding="utf-8")
+    assert "stateful_v4_slots" in markdown

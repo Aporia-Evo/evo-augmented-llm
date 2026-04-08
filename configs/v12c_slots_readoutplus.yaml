@@ -1,0 +1,14 @@
+mutation:
+  content_w_query_init_min: 0.5
+  content_w_query_init_max: 1.5
+  content_w_query_mutate_power: 0.1
+  content_b_query_init_min: 0.25
+  content_b_query_init_max: 0.95
+  content_b_query_mutate_power: 0.08
+  content_temperature_init_min: 2.4
+  content_temperature_init_max: 3.6
+  content_temperature_mutate_power: 0.08
+  content_b_match_init_min: -0.05
+  content_b_match_init_max: 0.35
+  content_b_match_mutate_power: 0.06
+  content_mutate_rate: 0.45
