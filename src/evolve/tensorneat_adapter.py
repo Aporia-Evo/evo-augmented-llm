@@ -14,6 +14,7 @@ from config import AppConfig
 from evolve.plasticity import (
     is_content_gated_variant,
     is_stateful_v4_slots_variant,
+    is_stateful_v6_delta_memory_variant,
     is_stateful_v2_gated_variant,
     is_stateful_v3_kv_variant,
     is_stateful_v2_variant,
@@ -668,6 +669,7 @@ class TensorNEATAdapter:
             is_content_gated_variant(config.run.variant)
             or is_stateful_v3_kv_variant(config.run.variant)
             or is_stateful_v4_slots_variant(config.run.variant)
+            or is_stateful_v6_delta_memory_variant(config.run.variant)
         )
         plastic_mode = plastic_mode_for_variant(config.run.variant)
         fixed_plastic_d = plastic_fixed_d_for_variant(config.run.variant)

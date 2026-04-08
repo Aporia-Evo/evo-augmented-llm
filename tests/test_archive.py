@@ -16,6 +16,7 @@ from evolve.archive import (
     QD_PROFILE_DELAY_ROBUSTNESS,
     QD_PROFILE_GENERAL_COMPACTNESS,
     QD_PROFILE_CONTENT_RETRIEVAL,
+    QD_PROFILE_DELTA_MEMORY_MECHANISM,
     QD_PROFILE_GATING_MECHANISM,
     QD_PROFILE_KV_RETRIEVAL_MECHANISM,
     QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
@@ -191,6 +192,24 @@ def test_archive_descriptor_binning_is_deterministic_for_slot_retrieval_mechanis
     assert first == second
     assert first.qd_profile == QD_PROFILE_SLOT_RETRIEVAL_MECHANISM
     assert "slotfocusbin_" in first.descriptor_key
+
+
+def test_archive_descriptor_binning_is_deterministic_for_delta_memory_mechanism() -> None:
+    first = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        query_memory_alignment=0.4,
+        qd_profile=QD_PROFILE_DELTA_MEMORY_MECHANISM,
+    )
+    second = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        query_memory_alignment=0.4,
+        qd_profile=QD_PROFILE_DELTA_MEMORY_MECHANISM,
+    )
+    assert first == second
+    assert first.qd_profile == QD_PROFILE_DELTA_MEMORY_MECHANISM
+    assert "qmalignbin_" in first.descriptor_key
 
 
 def test_general_compactness_builds_for_all_variants() -> None:

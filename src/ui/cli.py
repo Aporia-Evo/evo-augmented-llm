@@ -64,6 +64,7 @@ VARIANT_CHOICES = [
     "stateful_v3_kv",
     "stateful_v4_slots",
     "stateful_v5_addressed_slots",
+    "stateful_v6_delta_memory",
     "content_gated",
     "stateless",
     "stateful_plastic",
@@ -171,6 +172,10 @@ class GenerationBenchmarkRow:
     mean_read_address_focus: float | None = None
     write_read_address_gap: float | None = None
     readout_address_concentration: float | None = None
+    store_vs_distractor_beta_gap: float | None = None
+    query_memory_alignment: float | None = None
+    delta_correction_magnitude: float | None = None
+    mean_memory_frobenius_norm: float | None = None
 
 
 @dataclass(frozen=True)
@@ -212,6 +217,10 @@ class GenerationSuiteAggregate:
     mean_read_address_focus: float | None = None
     mean_write_read_address_gap: float | None = None
     mean_readout_address_concentration: float | None = None
+    mean_store_vs_distractor_beta_gap: float | None = None
+    mean_query_memory_alignment: float | None = None
+    mean_delta_correction_magnitude: float | None = None
+    mean_memory_frobenius_norm: float | None = None
 
 
 class CliObserver:
@@ -499,7 +508,7 @@ def build_parser() -> argparse.ArgumentParser:
     curriculum_compare_parser.add_argument("--task", choices=TASK_CHOICES, default="bit_memory")
     curriculum_compare_parser.add_argument(
         "--variants",
-        default="stateful,stateful_v2,stateful_v2_gated,stateful_v3_kv,stateful_v4_slots,stateful_v5_addressed_slots,content_gated,stateful_plastic_hebb",
+        default="stateful,stateful_v2,stateful_v2_gated,stateful_v3_kv,stateful_v4_slots,stateful_v5_addressed_slots,stateful_v6_delta_memory,content_gated,stateful_plastic_hebb",
         help="Comma-separated variants to include in the comparison report.",
     )
     curriculum_compare_parser.add_argument(
@@ -1235,6 +1244,10 @@ def _build_generation_benchmark_row(
         mean_read_address_focus=_coerce_optional_metric(best_candidate_metrics.get("mean_read_address_focus")),
         write_read_address_gap=_coerce_optional_metric(best_candidate_metrics.get("write_read_address_gap")),
         readout_address_concentration=_coerce_optional_metric(best_candidate_metrics.get("readout_address_concentration")),
+        store_vs_distractor_beta_gap=_coerce_optional_metric(best_candidate_metrics.get("store_vs_distractor_beta_gap")),
+        query_memory_alignment=_coerce_optional_metric(best_candidate_metrics.get("query_memory_alignment")),
+        delta_correction_magnitude=_coerce_optional_metric(best_candidate_metrics.get("delta_correction_magnitude")),
+        mean_memory_frobenius_norm=_coerce_optional_metric(best_candidate_metrics.get("mean_memory_frobenius_norm")),
     )
 
 
@@ -1388,6 +1401,10 @@ def _build_generation_suite_aggregates(rows: list[GenerationBenchmarkRow]) -> li
         readout_concentration_values = [
             float(row.readout_address_concentration) for row in grouped_rows if row.readout_address_concentration is not None
         ]
+        beta_gap_values = [float(row.store_vs_distractor_beta_gap) for row in grouped_rows if row.store_vs_distractor_beta_gap is not None]
+        query_memory_alignment_values = [float(row.query_memory_alignment) for row in grouped_rows if row.query_memory_alignment is not None]
+        delta_correction_values = [float(row.delta_correction_magnitude) for row in grouped_rows if row.delta_correction_magnitude is not None]
+        memory_norm_values = [float(row.mean_memory_frobenius_norm) for row in grouped_rows if row.mean_memory_frobenius_norm is not None]
         aggregates.append(
             GenerationSuiteAggregate(
                 task_name=task_name,
@@ -1503,6 +1520,10 @@ def _build_generation_suite_aggregates(rows: list[GenerationBenchmarkRow]) -> li
                     if readout_concentration_values
                     else None
                 ),
+                mean_store_vs_distractor_beta_gap=(sum(beta_gap_values) / len(beta_gap_values)) if beta_gap_values else None,
+                mean_query_memory_alignment=(sum(query_memory_alignment_values) / len(query_memory_alignment_values)) if query_memory_alignment_values else None,
+                mean_delta_correction_magnitude=(sum(delta_correction_values) / len(delta_correction_values)) if delta_correction_values else None,
+                mean_memory_frobenius_norm=(sum(memory_norm_values) / len(memory_norm_values)) if memory_norm_values else None,
             )
         )
     return aggregates
@@ -1568,6 +1589,10 @@ def _write_generation_suite_exports(
                 "mean_read_address_focus",
                 "mean_write_read_address_gap",
                 "mean_readout_address_concentration",
+                "mean_store_vs_distractor_beta_gap",
+                "mean_query_memory_alignment",
+                "mean_delta_correction_magnitude",
+                "mean_memory_frobenius_norm",
             ],
         )
         writer.writeheader()
@@ -1818,6 +1843,40 @@ def _render_generation_suite_markdown(
                             _format_optional_float(aggregate.mean_read_address_focus, precision=3),
                             _format_optional_float(aggregate.mean_write_read_address_gap, precision=3),
                             _format_optional_float(aggregate.mean_readout_address_concentration, precision=3),
+                        ]
+                    )
+                    + " |"
+                    for aggregate in retrieval_diagnostic_aggregates
+                ]
+            )
+            sections.append("")
+        if any(
+            aggregate.mean_store_vs_distractor_beta_gap is not None
+            or aggregate.mean_query_memory_alignment is not None
+            or aggregate.mean_delta_correction_magnitude is not None
+            or aggregate.mean_memory_frobenius_norm is not None
+            for aggregate in retrieval_diagnostic_aggregates
+        ):
+            sections.extend(
+                [
+                    "## Delta Memory Diagnostics",
+                    "",
+                    "| task | delay | variant | mean_store_vs_distractor_beta_gap | mean_query_memory_alignment | mean_delta_correction_magnitude | mean_memory_frobenius_norm |",
+                    "| --- | --- | --- | --- | --- | --- | --- |",
+                ]
+            )
+            sections.extend(
+                [
+                    "| "
+                    + " | ".join(
+                        [
+                            aggregate.task_name,
+                            aggregate.evaluation_delay_steps_label or str(aggregate.delay_steps),
+                            aggregate.variant,
+                            _format_optional_float(aggregate.mean_store_vs_distractor_beta_gap, precision=3),
+                            _format_optional_float(aggregate.mean_query_memory_alignment, precision=3),
+                            _format_optional_float(aggregate.mean_delta_correction_magnitude, precision=3),
+                            _format_optional_float(aggregate.mean_memory_frobenius_norm, precision=3),
                         ]
                     )
                     + " |"

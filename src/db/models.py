@@ -304,6 +304,19 @@ class CandidateFeatureRecord:
     query_read_alignment: float = 0.0
     store_write_alignment: float = 0.0
     readout_address_concentration: float = 0.0
+    mean_beta_write: float = 0.0
+    beta_at_store: float = 0.0
+    beta_at_distractor: float = 0.0
+    beta_at_query: float = 0.0
+    store_vs_distractor_beta_gap: float = 0.0
+    mean_key_norm: float = 0.0
+    mean_query_norm: float = 0.0
+    mean_value_norm: float = 0.0
+    mean_memory_frobenius_norm: float = 0.0
+    query_memory_alignment: float = 0.0
+    store_memory_update_strength: float = 0.0
+    delta_correction_magnitude: float = 0.0
+    memory_read_strength: float = 0.0
 
 
 @dataclass(frozen=True)

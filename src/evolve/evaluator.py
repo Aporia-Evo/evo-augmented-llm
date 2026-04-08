@@ -23,6 +23,7 @@ from evolve.custom_neuron import (
     StatefulNetworkExecutor,
     StatefulV4SlotsNetworkExecutor,
     StatefulV5AddressedSlotsNetworkExecutor,
+    StatefulV6DeltaMemoryNetworkExecutor,
     StatefulV2GatedNetworkExecutor,
     StatefulV3KVNetworkExecutor,
     StatefulV2NetworkExecutor,
@@ -32,6 +33,7 @@ from evolve.plasticity import (
     is_content_gated_variant,
     is_stateful_v4_slots_variant,
     is_stateful_v5_addressed_slots_variant,
+    is_stateful_v6_delta_memory_variant,
     is_stateful_v3_kv_variant,
     is_stateful_v2_gated_variant,
     is_stateful_v2_variant,
@@ -837,6 +839,8 @@ def _build_executor(
         return StatefulV4SlotsNetworkExecutor(activation_steps=activation_steps)
     if is_stateful_v5_addressed_slots_variant(variant):
         return StatefulV5AddressedSlotsNetworkExecutor(activation_steps=activation_steps)
+    if is_stateful_v6_delta_memory_variant(variant):
+        return StatefulV6DeltaMemoryNetworkExecutor(activation_steps=activation_steps)
     plastic_mode = plastic_mode_for_variant(variant)
     if plastic_mode == "hebb":
         return PlasticNetworkExecutor(
@@ -928,6 +932,19 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
             "query_read_alignment": 0.0,
             "store_write_alignment": 0.0,
             "readout_address_concentration": 0.0,
+            "mean_beta_write": 0.0,
+            "beta_at_store": 0.0,
+            "beta_at_distractor": 0.0,
+            "beta_at_query": 0.0,
+            "store_vs_distractor_beta_gap": 0.0,
+            "mean_key_norm": 0.0,
+            "mean_query_norm": 0.0,
+            "mean_value_norm": 0.0,
+            "mean_memory_frobenius_norm": 0.0,
+            "query_memory_alignment": 0.0,
+            "store_memory_update_strength": 0.0,
+            "delta_correction_magnitude": 0.0,
+            "memory_read_strength": 0.0,
         }
     return {
         "plasticity_enabled": metrics.plasticity_enabled,
@@ -1004,6 +1021,19 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
         "query_read_alignment": metrics.query_read_alignment,
         "store_write_alignment": metrics.store_write_alignment,
         "readout_address_concentration": metrics.readout_address_concentration,
+        "mean_beta_write": metrics.mean_beta_write,
+        "beta_at_store": metrics.beta_at_store,
+        "beta_at_distractor": metrics.beta_at_distractor,
+        "beta_at_query": metrics.beta_at_query,
+        "store_vs_distractor_beta_gap": metrics.store_vs_distractor_beta_gap,
+        "mean_key_norm": metrics.mean_key_norm,
+        "mean_query_norm": metrics.mean_query_norm,
+        "mean_value_norm": metrics.mean_value_norm,
+        "mean_memory_frobenius_norm": metrics.mean_memory_frobenius_norm,
+        "query_memory_alignment": metrics.query_memory_alignment,
+        "store_memory_update_strength": metrics.store_memory_update_strength,
+        "delta_correction_magnitude": metrics.delta_correction_magnitude,
+        "memory_read_strength": metrics.memory_read_strength,
     }
 
 
@@ -1112,6 +1142,19 @@ def _aggregate_episode_metrics(metrics: Sequence[PlasticityEpisodeMetrics]) -> P
         query_read_alignment=float(np.mean([metric.query_read_alignment for metric in metrics])),
         store_write_alignment=float(np.mean([metric.store_write_alignment for metric in metrics])),
         readout_address_concentration=float(np.mean([metric.readout_address_concentration for metric in metrics])),
+        mean_beta_write=float(np.mean([metric.mean_beta_write for metric in metrics])),
+        beta_at_store=float(np.mean([metric.beta_at_store for metric in metrics])),
+        beta_at_distractor=float(np.mean([metric.beta_at_distractor for metric in metrics])),
+        beta_at_query=float(np.mean([metric.beta_at_query for metric in metrics])),
+        store_vs_distractor_beta_gap=float(np.mean([metric.store_vs_distractor_beta_gap for metric in metrics])),
+        mean_key_norm=float(np.mean([metric.mean_key_norm for metric in metrics])),
+        mean_query_norm=float(np.mean([metric.mean_query_norm for metric in metrics])),
+        mean_value_norm=float(np.mean([metric.mean_value_norm for metric in metrics])),
+        mean_memory_frobenius_norm=float(np.mean([metric.mean_memory_frobenius_norm for metric in metrics])),
+        query_memory_alignment=float(np.mean([metric.query_memory_alignment for metric in metrics])),
+        store_memory_update_strength=float(np.mean([metric.store_memory_update_strength for metric in metrics])),
+        delta_correction_magnitude=float(np.mean([metric.delta_correction_magnitude for metric in metrics])),
+        memory_read_strength=float(np.mean([metric.memory_read_strength for metric in metrics])),
     )
 
 

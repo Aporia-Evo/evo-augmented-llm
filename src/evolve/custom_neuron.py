@@ -136,6 +136,19 @@ class PlasticityEpisodeMetrics:
     query_read_alignment: float = 0.0
     store_write_alignment: float = 0.0
     readout_address_concentration: float = 0.0
+    mean_beta_write: float = 0.0
+    beta_at_store: float = 0.0
+    beta_at_distractor: float = 0.0
+    beta_at_query: float = 0.0
+    store_vs_distractor_beta_gap: float = 0.0
+    mean_key_norm: float = 0.0
+    mean_query_norm: float = 0.0
+    mean_value_norm: float = 0.0
+    mean_memory_frobenius_norm: float = 0.0
+    query_memory_alignment: float = 0.0
+    store_memory_update_strength: float = 0.0
+    delta_correction_magnitude: float = 0.0
+    memory_read_strength: float = 0.0
 
 
 def _incoming_connections_by_target(genome: GenomeModel) -> dict[int, list[ConnectionGeneModel]]:
@@ -1010,6 +1023,136 @@ class StatefulV5AddressedSlotsNetworkExecutor(StatefulNetworkExecutor):
             store_write_alignment=float(np.mean(write_alignment_vals)) if write_alignment_vals else 0.0,
             distractor_write_leak=float(np.mean(leak_vals)) if leak_vals else 0.0,
             readout_address_concentration=float(np.mean(concentration_vals)) if concentration_vals else 0.0,
+        )
+        return np.vstack(sequence_outputs)
+
+    def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
+        return self._last_metrics
+
+
+class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
+    def __init__(self, activation_steps: int) -> None:
+        super().__init__(activation_steps=activation_steps)
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+        )
+
+    def run_sequence(
+        self,
+        genome: GenomeModel,
+        input_sequence: Sequence[Sequence[float]],
+        *,
+        step_roles: Sequence[str] | None = None,
+    ) -> np.ndarray:
+        incoming_by_target = _incoming_connections_by_target(genome)
+        d_key = 8
+        d_value = 8
+        memory_state = {
+            node.node_id: np.zeros((d_value, d_key), dtype=np.float64) for node in genome.nodes if not node.is_input
+        }
+        outputs = {node.node_id: 0.0 for node in genome.nodes}
+        sequence_outputs: list[np.ndarray] = []
+        beta_vals: list[float] = []
+        beta_store_vals: list[float] = []
+        beta_distractor_vals: list[float] = []
+        beta_query_vals: list[float] = []
+        key_norm_vals: list[float] = []
+        query_norm_vals: list[float] = []
+        value_norm_vals: list[float] = []
+        memory_norm_vals: list[float] = []
+        query_alignment_vals: list[float] = []
+        store_update_vals: list[float] = []
+        delta_correction_vals: list[float] = []
+        memory_read_vals: list[float] = []
+
+        for step_index, inputs in enumerate(input_sequence):
+            step_role = _step_role_at(step_roles, step_index)
+            input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
+            outputs.update(input_map)
+            for _ in range(self.activation_steps):
+                previous_outputs = dict(outputs)
+                next_outputs = dict(input_map)
+                for node in genome.nodes:
+                    if node.is_input:
+                        continue
+                    summed_input = 0.0
+                    for conn in incoming_by_target.get(node.node_id, ()):
+                        summed_input += conn.weight * previous_outputs.get(conn.in_id, 0.0)
+                    x_t = summed_input + node.bias
+                    x_norm = x_t / (1.0 + abs(x_t))
+                    x_abs = abs(x_norm)
+                    key_seed = (node.content_w_key * x_norm) + (node.content_b_key * x_abs)
+                    query_seed = (node.content_w_query * x_norm) + (node.content_b_query * x_abs)
+                    value_seed = summed_input + node.slow_output_gain
+                    beta_logit = (node.content_temperature * x_norm) + node.content_b_match
+                    beta_t = 1.0 / (1.0 + math.exp(-beta_logit))
+                    k_t = np.asarray([math.exp(key_seed + (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
+                    q_t = np.asarray([math.exp(query_seed - (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
+                    v_t = np.asarray(
+                        [value_seed + (0.1 * node.content_temperature * (idx - (d_value - 1) / 2.0)) for idx in range(d_value)],
+                        dtype=np.float64,
+                    )
+                    state = memory_state[node.node_id]
+                    v_hat_t = state @ k_t
+                    delta_t = v_t - v_hat_t
+                    update = beta_t * np.outer(delta_t, k_t)
+                    new_state = state + update
+                    memory_state[node.node_id] = new_state
+                    read_t = new_state @ q_t
+                    read_gain = 1.0 + node.slow_input_gain
+                    readout = float(np.mean(read_t))
+                    next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
+                    key_norm_vals.append(float(np.linalg.norm(k_t)))
+                    query_norm_vals.append(float(np.linalg.norm(q_t)))
+                    value_norm_vals.append(float(np.linalg.norm(v_t)))
+                    memory_norm_vals.append(float(np.linalg.norm(new_state, ord="fro")))
+                    beta_vals.append(beta_t)
+                    delta_mag = float(np.linalg.norm(delta_t))
+                    delta_correction_vals.append(delta_mag)
+                    memory_read_vals.append(float(np.linalg.norm(read_t)))
+                    if step_role == "store":
+                        beta_store_vals.append(beta_t)
+                        store_update_vals.append(float(np.linalg.norm(update, ord="fro")))
+                    elif step_role == "distractor":
+                        beta_distractor_vals.append(beta_t)
+                    elif step_role == "query":
+                        beta_query_vals.append(beta_t)
+                        query_alignment_vals.append(float(np.dot(q_t, k_t) / (np.linalg.norm(q_t) * np.linalg.norm(k_t) + 1e-9)))
+                outputs = next_outputs
+            sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
+        mean_store_beta = float(np.mean(beta_store_vals)) if beta_store_vals else 0.0
+        mean_distractor_beta = float(np.mean(beta_distractor_vals)) if beta_distractor_vals else 0.0
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+            mean_beta_write=float(np.mean(beta_vals)) if beta_vals else 0.0,
+            beta_at_store=mean_store_beta,
+            beta_at_distractor=mean_distractor_beta,
+            beta_at_query=float(np.mean(beta_query_vals)) if beta_query_vals else 0.0,
+            store_vs_distractor_beta_gap=mean_store_beta - mean_distractor_beta,
+            mean_key_norm=float(np.mean(key_norm_vals)) if key_norm_vals else 0.0,
+            mean_query_norm=float(np.mean(query_norm_vals)) if query_norm_vals else 0.0,
+            mean_value_norm=float(np.mean(value_norm_vals)) if value_norm_vals else 0.0,
+            mean_memory_frobenius_norm=float(np.mean(memory_norm_vals)) if memory_norm_vals else 0.0,
+            query_memory_alignment=float(np.mean(query_alignment_vals)) if query_alignment_vals else 0.0,
+            store_memory_update_strength=float(np.mean(store_update_vals)) if store_update_vals else 0.0,
+            delta_correction_magnitude=float(np.mean(delta_correction_vals)) if delta_correction_vals else 0.0,
+            memory_read_strength=float(np.mean(memory_read_vals)) if memory_read_vals else 0.0,
         )
         return np.vstack(sequence_outputs)
 
