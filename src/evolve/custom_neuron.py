@@ -1071,6 +1071,10 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         delta_clip_norm = 2.0
         update_clip_frob = 1.0
         read_clip_norm = 2.0
+        position_axis = np.linspace(-1.0, 1.0, d_key, dtype=np.float64)
+        alt_sign = np.where(np.arange(d_key) % 2 == 0, 1.0, -1.0).astype(np.float64)
+        center_peak = 1.0 - np.abs(position_axis)
+        centered_square = (position_axis**2) - float(np.mean(position_axis**2))
         memory_state = {
             node.node_id: np.zeros((d_value, d_key), dtype=np.float64) for node in genome.nodes if not node.is_input
         }
@@ -1130,8 +1134,31 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     )
                     beta_t = beta_base * (0.15 + (0.85 * store_signal)) * (1.0 - (0.5 * query_signal))
                     beta_t = min(0.98, max(0.02, beta_t))
-                    k_raw = np.asarray([1.0 + math.tanh(key_seed + (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
-                    q_raw = np.asarray([1.0 + math.tanh(query_seed - (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
+                    key_core = (
+                        key_seed * (0.9 + (0.5 * center_peak))
+                        + (0.6 * node.content_b_key * position_axis)
+                        + (0.35 * node.content_w_key * alt_sign)
+                    )
+                    key_cross = 0.25 * query_seed * position_axis * alt_sign
+                    k_raw = (
+                        1.0
+                        + (0.45 * np.tanh(key_core))
+                        + (0.35 * np.tanh((key_core * alt_sign) + (0.5 * key_cross)))
+                        + (0.2 * np.tanh((key_seed - query_seed) * (center_peak - 0.5)))
+                    )
+                    query_core = (
+                        query_seed * (0.8 - (0.4 * center_peak))
+                        - (0.55 * node.content_b_query * position_axis)
+                        + (0.4 * node.content_w_query * centered_square)
+                    )
+                    q_raw = (
+                        1.0
+                        + (0.5 * np.tanh(query_core + (0.3 * alt_sign)))
+                        + (0.3 * np.tanh((query_seed - key_seed) * (position_axis * alt_sign)))
+                        + (0.25 * np.tanh((query_core * position_axis) - (0.2 * key_seed * alt_sign)))
+                    )
+                    k_raw = np.maximum(k_raw, 1e-3)
+                    q_raw = np.maximum(q_raw, 1e-3)
                     k_t = _positive_sum_normalize(k_raw)
                     q_t = _positive_sum_normalize(q_raw)
                     v_t = np.asarray(
