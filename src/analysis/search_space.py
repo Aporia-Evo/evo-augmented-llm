@@ -51,6 +51,19 @@ SUMMARY_FEATURES = [
     "query_read_alignment",
     "store_write_alignment",
     "readout_address_concentration",
+    "mean_beta_write",
+    "beta_at_store",
+    "beta_at_distractor",
+    "beta_at_query",
+    "store_vs_distractor_beta_gap",
+    "mean_key_norm",
+    "mean_query_norm",
+    "mean_value_norm",
+    "mean_memory_frobenius_norm",
+    "query_memory_alignment",
+    "store_memory_update_strength",
+    "delta_correction_magnitude",
+    "memory_read_strength",
     "mean_eta",
     "mean_plastic_d",
     "plastic_d_at_lower_bound_fraction",
@@ -275,6 +288,10 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
     mean_store_write_alignment = _safe_mean([record.store_write_alignment for record in records])
     mean_distractor_write_leak = _safe_mean([record.distractor_write_leak for record in records])
     mean_readout_address_concentration = _safe_mean([record.readout_address_concentration for record in records])
+    mean_store_vs_distractor_beta_gap = _safe_mean([record.store_vs_distractor_beta_gap for record in records])
+    mean_query_memory_alignment = _safe_mean([record.query_memory_alignment for record in records])
+    mean_delta_correction_magnitude = _safe_mean([record.delta_correction_magnitude for record in records])
+    mean_memory_frobenius_norm = _safe_mean([record.mean_memory_frobenius_norm for record in records])
     mean_score_over_delays = _safe_mean([record.mean_score_over_delays for record in records])
     mean_delay_score_std = _safe_mean([record.delay_score_std for record in records])
     mean_delay_score_range = _safe_mean([record.delay_score_range for record in records])
@@ -418,6 +435,24 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
             hints.append("Store-Write- und Query-Read-Ausrichtung sind gleichzeitig messbar; Slot-Rollen werden funktionaler getrennt.")
         if mean_distractor_write_leak >= 0.15:
             hints.append("Distraktoren aktivieren weiterhin breite Schreibpfade; Leak im adressierten Slot-Mechanismus bleibt erhoeht.")
+        if mean_store_vs_distractor_beta_gap <= 0.02:
+            hints.append("Delta-Write-Gate trennt Store und Distraktor noch nicht sauber; beta bleibt zu undifferenziert.")
+        elif mean_store_vs_distractor_beta_gap >= 0.1:
+            hints.append("Delta-Write-Gate zeigt selektives Schreiben: Store-Schritte haben klar hoehere beta-Werte als Distraktoren.")
+        if mean_query_memory_alignment <= 0.1:
+            hints.append("Query-Memory-Alignment bleibt schwach; der Delta-Speicher wird bei Query noch nicht stabil ausgerichtet gelesen.")
+        elif mean_query_memory_alignment >= 0.3:
+            hints.append("Query-Memory-Alignment ist klar messbar; der Delta-Pfad zeigt funktionale inhaltsbasierte Auslese.")
+        if mean_delta_correction_magnitude <= 0.01:
+            hints.append("Delta-Korrektur bleibt sehr klein; Speicherupdates wirken eher additiv-passiv statt korrektiv.")
+        elif mean_delta_correction_magnitude >= 2.0:
+            hints.append("Delta-Korrektur ist sehr gross; Risiko fuer instabile Korrektur-Updates im Fast-Weight-Speicher steigt.")
+        if mean_memory_frobenius_norm <= 0.2:
+            hints.append("Memory-Norm kollabiert nahe Null; Delta-Memory scheint zu wenig persistenten Inhalt zu halten.")
+        elif mean_memory_frobenius_norm >= 20.0:
+            hints.append("Memory-Norm ist hoch; moegliche Matrix-Explosion im Delta-Regime beobachten.")
+        else:
+            hints.append("Memory-Norm bleibt im mittleren Bereich; kein offensichtlicher Kollaps oder Divergenz im Delta-Speicher.")
 
     if phase_one_records and phase_two_records:
         phase_one_score = _safe_mean([record.score_current_phase for record in phase_one_records])

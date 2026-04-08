@@ -364,6 +364,7 @@ def test_benchmark_suite_key_value_memory_supports_profile_overrides(tmp_path: P
         "kv_retrieval_mechanism",
         "slot_retrieval_mechanism",
         "addressed_slot_mechanism",
+        "delta_memory_mechanism",
     }
     markdown = (tmp_path / "kv-suite.md").read_text(encoding="utf-8")
     assert "## Retrieval Diagnostics" in markdown
@@ -372,6 +373,8 @@ def test_benchmark_suite_key_value_memory_supports_profile_overrides(tmp_path: P
     assert "mean_store_vs_distractor_write_gap" in markdown
     assert "## Slot Retrieval Diagnostics" in markdown
     assert "mean_query_slot_match_max" in markdown
+    assert "## Delta Memory Diagnostics" in markdown
+    assert "mean_query_memory_alignment" in markdown
     feature_rows = [
         json.loads(line)
         for line in (tmp_path / "kv-suite.candidate-features.jsonl").read_text(encoding="utf-8").splitlines()

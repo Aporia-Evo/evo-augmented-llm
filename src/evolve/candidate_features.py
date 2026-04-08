@@ -206,6 +206,19 @@ def extract_candidate_features(
         query_read_alignment=_coerce_float(metrics.get("query_read_alignment")),
         store_write_alignment=_coerce_float(metrics.get("store_write_alignment")),
         readout_address_concentration=_coerce_float(metrics.get("readout_address_concentration")),
+        mean_beta_write=_coerce_float(metrics.get("mean_beta_write")),
+        beta_at_store=_coerce_float(metrics.get("beta_at_store")),
+        beta_at_distractor=_coerce_float(metrics.get("beta_at_distractor")),
+        beta_at_query=_coerce_float(metrics.get("beta_at_query")),
+        store_vs_distractor_beta_gap=_coerce_float(metrics.get("store_vs_distractor_beta_gap")),
+        mean_key_norm=_coerce_float(metrics.get("mean_key_norm")),
+        mean_query_norm=_coerce_float(metrics.get("mean_query_norm")),
+        mean_value_norm=_coerce_float(metrics.get("mean_value_norm")),
+        mean_memory_frobenius_norm=_coerce_float(metrics.get("mean_memory_frobenius_norm")),
+        query_memory_alignment=_coerce_float(metrics.get("query_memory_alignment")),
+        store_memory_update_strength=_coerce_float(metrics.get("store_memory_update_strength")),
+        delta_correction_magnitude=_coerce_float(metrics.get("delta_correction_magnitude")),
+        memory_read_strength=_coerce_float(metrics.get("memory_read_strength")),
     )
     vector = _feature_vector_from_record(feature)
     return feature, vector
@@ -324,6 +337,19 @@ def _feature_vector_from_record(record: CandidateFeatureRecord) -> CandidateFeat
         record.query_read_alignment,
         record.store_write_alignment,
         record.readout_address_concentration,
+        record.mean_beta_write,
+        record.beta_at_store,
+        record.beta_at_distractor,
+        record.beta_at_query,
+        record.store_vs_distractor_beta_gap,
+        record.mean_key_norm,
+        record.mean_query_norm,
+        record.mean_value_norm,
+        record.mean_memory_frobenius_norm,
+        record.query_memory_alignment,
+        record.store_memory_update_strength,
+        record.delta_correction_magnitude,
+        record.memory_read_strength,
     ]
     array = np.asarray(vector, dtype=np.float64)
     norm_l2 = float(np.linalg.norm(array))
