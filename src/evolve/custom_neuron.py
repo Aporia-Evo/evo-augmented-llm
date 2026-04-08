@@ -1092,6 +1092,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         store_update_vals: list[float] = []
         delta_correction_vals: list[float] = []
         memory_read_vals: list[float] = []
+        readout_selectivity_vals: list[float] = []
 
         for step_index, inputs in enumerate(input_sequence):
             step_role = _step_role_at(step_roles, step_index)
@@ -1183,6 +1184,14 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     memory_state[node.node_id] = new_state
                     read_t = decayed_state @ q_t
                     read_t = _clip_vector_norm(read_t, max_norm=read_clip_norm)
+                    q_centered = q_t - float(np.mean(q_t))
+                    q_focus_logits = 4.0 * q_centered
+                    q_focus_logits = q_focus_logits - float(np.max(q_focus_logits))
+                    q_focus = np.exp(q_focus_logits)
+                    q_focus = q_focus / (float(np.sum(q_focus)) + 1e-9)
+                    read_mean = float(np.mean(read_t))
+                    selective_readout = float(np.dot(read_t, q_focus))
+                    readout = (0.35 * read_mean) + (0.65 * selective_readout)
                     read_gain = max(
                         0.25,
                         min(
@@ -1190,7 +1199,6 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             (1.0 + node.slow_input_gain) * (0.5 + (0.8 * query_signal)),
                         ),
                     )
-                    readout = float(np.mean(read_t))
                     next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
                     key_norm_vals.append(float(np.linalg.norm(k_t)))
                     query_norm_vals.append(float(np.linalg.norm(q_t)))
@@ -1200,6 +1208,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     delta_mag = float(np.linalg.norm(delta_t))
                     delta_correction_vals.append(delta_mag)
                     memory_read_vals.append(float(np.linalg.norm(read_t)))
+                    readout_selectivity_vals.append(float(np.max(q_focus) - np.mean(q_focus)))
                     if step_role == "store":
                         beta_store_vals.append(beta_t)
                         store_update_vals.append(float(np.linalg.norm(update, ord="fro")))
@@ -1235,6 +1244,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
             store_memory_update_strength=float(np.mean(store_update_vals)) if store_update_vals else 0.0,
             delta_correction_magnitude=float(np.mean(delta_correction_vals)) if delta_correction_vals else 0.0,
             memory_read_strength=float(np.mean(memory_read_vals)) if memory_read_vals else 0.0,
+            readout_selectivity=float(np.mean(readout_selectivity_vals)) if readout_selectivity_vals else 0.0,
         )
         return np.vstack(sequence_outputs)
 
