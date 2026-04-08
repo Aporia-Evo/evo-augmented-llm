@@ -1109,7 +1109,27 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     query_seed = (node.content_w_query * x_norm) + (node.content_b_query * x_abs)
                     value_seed = summed_input + node.slow_output_gain
                     beta_logit = (node.content_temperature * x_norm) + node.content_b_match
-                    beta_t = 1.0 / (1.0 + math.exp(-beta_logit))
+                    beta_base = 1.0 / (1.0 + math.exp(-beta_logit))
+                    store_signal = 1.0 / (
+                        1.0
+                        + math.exp(
+                            -(
+                                1.5 * (abs(key_seed) - abs(query_seed))
+                                + (0.5 * node.content_b_key)
+                            )
+                        )
+                    )
+                    query_signal = 1.0 / (
+                        1.0
+                        + math.exp(
+                            -(
+                                1.5 * (abs(query_seed) - abs(key_seed))
+                                + (0.5 * node.content_b_query)
+                            )
+                        )
+                    )
+                    beta_t = beta_base * (0.15 + (0.85 * store_signal)) * (1.0 - (0.5 * query_signal))
+                    beta_t = min(0.98, max(0.02, beta_t))
                     k_raw = np.asarray([1.0 + math.tanh(key_seed + (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
                     q_raw = np.asarray([1.0 + math.tanh(query_seed - (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
                     k_t = _positive_sum_normalize(k_raw)
@@ -1124,18 +1144,25 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         dtype=np.float64,
                     )
                     state = memory_state[node.node_id]
-                    v_hat_t = state @ k_t
+                    decayed_state = memory_decay * state
+                    v_hat_t = decayed_state @ k_t
                     delta_t = v_t - v_hat_t
                     delta_t = _clip_vector_norm(delta_t, max_norm=delta_clip_norm)
                     update = beta_t * np.outer(delta_t, k_t)
                     update_norm = float(np.linalg.norm(update, ord="fro"))
                     if update_norm > update_clip_frob:
                         update = update * (update_clip_frob / (update_norm + 1e-9))
-                    new_state = (memory_decay * state) + update
+                    new_state = decayed_state + update
                     memory_state[node.node_id] = new_state
-                    read_t = new_state @ q_t
+                    read_t = decayed_state @ q_t
                     read_t = _clip_vector_norm(read_t, max_norm=read_clip_norm)
-                    read_gain = max(0.25, min(1.5, 1.0 + node.slow_input_gain))
+                    read_gain = max(
+                        0.25,
+                        min(
+                            1.5,
+                            (1.0 + node.slow_input_gain) * (0.5 + (0.8 * query_signal)),
+                        ),
+                    )
                     readout = float(np.mean(read_t))
                     next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
                     key_norm_vals.append(float(np.linalg.norm(k_t)))
