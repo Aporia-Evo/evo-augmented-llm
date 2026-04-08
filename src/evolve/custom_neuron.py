@@ -54,6 +54,18 @@ def update_adaptive_delta_weight(
     return clamp_delta_weight(updated_delta, clamp)
 
 
+def _positive_sum_normalize(vec: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+    clipped = np.maximum(vec, 0.0)
+    return clipped / (float(np.sum(clipped)) + eps)
+
+
+def _clip_vector_norm(vec: np.ndarray, max_norm: float, eps: float = 1e-9) -> np.ndarray:
+    norm = float(np.linalg.norm(vec))
+    if norm <= max_norm:
+        return vec
+    return vec * (max_norm / (norm + eps))
+
+
 @dataclass(frozen=True)
 class NodeExecutionState:
     memory: float
@@ -1055,6 +1067,10 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         incoming_by_target = _incoming_connections_by_target(genome)
         d_key = 8
         d_value = 8
+        memory_decay = 0.97
+        delta_clip_norm = 2.0
+        update_clip_frob = 1.0
+        read_clip_norm = 2.0
         memory_state = {
             node.node_id: np.zeros((d_value, d_key), dtype=np.float64) for node in genome.nodes if not node.is_input
         }
@@ -1094,20 +1110,32 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     value_seed = summed_input + node.slow_output_gain
                     beta_logit = (node.content_temperature * x_norm) + node.content_b_match
                     beta_t = 1.0 / (1.0 + math.exp(-beta_logit))
-                    k_t = np.asarray([math.exp(key_seed + (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
-                    q_t = np.asarray([math.exp(query_seed - (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
+                    k_raw = np.asarray([1.0 + math.tanh(key_seed + (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
+                    q_raw = np.asarray([1.0 + math.tanh(query_seed - (0.05 * idx)) for idx in range(d_key)], dtype=np.float64)
+                    k_t = _positive_sum_normalize(k_raw)
+                    q_t = _positive_sum_normalize(q_raw)
                     v_t = np.asarray(
-                        [value_seed + (0.1 * node.content_temperature * (idx - (d_value - 1) / 2.0)) for idx in range(d_value)],
+                        [
+                            math.tanh(
+                                value_seed + (0.1 * node.content_temperature * (idx - (d_value - 1) / 2.0))
+                            )
+                            for idx in range(d_value)
+                        ],
                         dtype=np.float64,
                     )
                     state = memory_state[node.node_id]
                     v_hat_t = state @ k_t
                     delta_t = v_t - v_hat_t
+                    delta_t = _clip_vector_norm(delta_t, max_norm=delta_clip_norm)
                     update = beta_t * np.outer(delta_t, k_t)
-                    new_state = state + update
+                    update_norm = float(np.linalg.norm(update, ord="fro"))
+                    if update_norm > update_clip_frob:
+                        update = update * (update_clip_frob / (update_norm + 1e-9))
+                    new_state = (memory_decay * state) + update
                     memory_state[node.node_id] = new_state
                     read_t = new_state @ q_t
-                    read_gain = 1.0 + node.slow_input_gain
+                    read_t = _clip_vector_norm(read_t, max_norm=read_clip_norm)
+                    read_gain = max(0.25, min(1.5, 1.0 + node.slow_input_gain))
                     readout = float(np.mean(read_t))
                     next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
                     key_norm_vals.append(float(np.linalg.norm(k_t)))
