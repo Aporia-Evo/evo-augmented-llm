@@ -287,6 +287,12 @@ class CandidateFeatureRecord:
     mean_match_signal: float = 0.0
     value_state_at_query: float = 0.0
     key_state_at_query: float = 0.0
+    slot_key_separation: float = 0.0
+    slot_value_separation: float = 0.0
+    slot_write_focus: float = 0.0
+    slot_query_focus: float = 0.0
+    slot_readout_selectivity: float = 0.0
+    slot_utilization: float = 0.0
 
 
 @dataclass(frozen=True)

@@ -189,6 +189,12 @@ def extract_candidate_features(
         mean_match_signal=_coerce_float(metrics.get("mean_match_signal", metrics.get("match_mean"))),
         value_state_at_query=_coerce_float(metrics.get("value_state_at_query")),
         key_state_at_query=_coerce_float(metrics.get("key_state_at_query")),
+        slot_key_separation=_coerce_float(metrics.get("slot_key_separation")),
+        slot_value_separation=_coerce_float(metrics.get("slot_value_separation")),
+        slot_write_focus=_coerce_float(metrics.get("slot_write_focus")),
+        slot_query_focus=_coerce_float(metrics.get("slot_query_focus")),
+        slot_readout_selectivity=_coerce_float(metrics.get("slot_readout_selectivity")),
+        slot_utilization=_coerce_float(metrics.get("slot_utilization")),
     )
     vector = _feature_vector_from_record(feature)
     return feature, vector
@@ -290,6 +296,12 @@ def _feature_vector_from_record(record: CandidateFeatureRecord) -> CandidateFeat
         record.mean_match_signal,
         record.value_state_at_query,
         record.key_state_at_query,
+        record.slot_key_separation,
+        record.slot_value_separation,
+        record.slot_write_focus,
+        record.slot_query_focus,
+        record.slot_readout_selectivity,
+        record.slot_utilization,
     ]
     array = np.asarray(vector, dtype=np.float64)
     norm_l2 = float(np.linalg.norm(array))

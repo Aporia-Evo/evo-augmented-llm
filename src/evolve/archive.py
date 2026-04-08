@@ -30,6 +30,7 @@ QD_PROFILE_RETRIEVAL_MECHANISM = "retrieval_mechanism"
 QD_PROFILE_GATING_MECHANISM = "gating_mechanism"
 QD_PROFILE_CONTENT_RETRIEVAL = "content_retrieval"
 QD_PROFILE_KV_RETRIEVAL_MECHANISM = "kv_retrieval_mechanism"
+QD_PROFILE_SLOT_RETRIEVAL_MECHANISM = "slot_retrieval_mechanism"
 DEFAULT_QD_PROFILE = QD_PROFILE_MECHANISM_V2
 
 ARCHIVE_DESCRIPTOR_VERSION_MECHANISM_V2 = "v7a-qdlight-v1"
@@ -41,6 +42,7 @@ ARCHIVE_DESCRIPTOR_VERSION_RETRIEVAL_MECHANISM = "v9b-retrieval-v1"
 ARCHIVE_DESCRIPTOR_VERSION_GATING_MECHANISM = "v10a-gating-v1"
 ARCHIVE_DESCRIPTOR_VERSION_CONTENT_RETRIEVAL = "v10c-content-v1"
 ARCHIVE_DESCRIPTOR_VERSION_KV_RETRIEVAL_MECHANISM = "v11b-kv-v1"
+ARCHIVE_DESCRIPTOR_VERSION_SLOT_RETRIEVAL_MECHANISM = "v12a-slots-v1"
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,9 @@ def build_archive_cell(
         query_key_alignment=feature_record.query_key_alignment,
         store_vs_distractor_write_gap=feature_record.store_vs_distractor_write_gap,
         readout_selectivity=feature_record.readout_selectivity,
+        slot_write_focus=feature_record.slot_write_focus,
+        slot_query_focus=feature_record.slot_query_focus,
+        slot_utilization=feature_record.slot_utilization,
         curriculum_enabled=feature_record.curriculum_enabled,
         curriculum_phase_1_delays=feature_record.curriculum_phase_1_delays,
         curriculum_phase_2_delays=feature_record.curriculum_phase_2_delays,
@@ -151,6 +156,9 @@ def build_archive_descriptor(
     query_key_alignment: float = 0.0,
     store_vs_distractor_write_gap: float = 0.0,
     readout_selectivity: float = 0.0,
+    slot_write_focus: float = 0.0,
+    slot_query_focus: float = 0.0,
+    slot_utilization: float = 0.0,
     curriculum_enabled: bool = False,
     curriculum_phase_1_delays: str = "",
     curriculum_phase_2_delays: str = "",
@@ -185,6 +193,10 @@ def build_archive_descriptor(
     if qd_profile == QD_PROFILE_KV_RETRIEVAL_MECHANISM:
         builder_kwargs["store_vs_distractor_write_gap"] = store_vs_distractor_write_gap
         builder_kwargs["readout_selectivity"] = readout_selectivity
+    if qd_profile == QD_PROFILE_SLOT_RETRIEVAL_MECHANISM:
+        builder_kwargs["slot_write_focus"] = slot_write_focus
+        builder_kwargs["slot_query_focus"] = slot_query_focus
+        builder_kwargs["slot_utilization"] = slot_utilization
     return profile.builder(**builder_kwargs)
 
 
@@ -194,7 +206,7 @@ def archive_profile_names(*, task_name: str | None = None) -> tuple[str, ...]:
         profile_names = [
             profile_name
             for profile_name in profile_names
-            if profile_name not in {QD_PROFILE_RETRIEVAL_STRATEGY, QD_PROFILE_RETRIEVAL_MECHANISM, QD_PROFILE_GATING_MECHANISM, QD_PROFILE_CONTENT_RETRIEVAL, QD_PROFILE_KV_RETRIEVAL_MECHANISM}
+            if profile_name not in {QD_PROFILE_RETRIEVAL_STRATEGY, QD_PROFILE_RETRIEVAL_MECHANISM, QD_PROFILE_GATING_MECHANISM, QD_PROFILE_CONTENT_RETRIEVAL, QD_PROFILE_KV_RETRIEVAL_MECHANISM, QD_PROFILE_SLOT_RETRIEVAL_MECHANISM}
         ]
     return tuple(profile_names)
 
@@ -775,6 +787,64 @@ def _build_kv_retrieval_mechanism_descriptor(
     )
 
 
+def _build_slot_retrieval_mechanism_descriptor(
+    *,
+    final_max_score: float,
+    score_ceiling: float,
+    mean_score_over_delays: float | None,
+    delay_score_std: float,
+    slow_fast_contribution_ratio: float,
+    enabled_conn_count: int,
+    retrieval_score: float,
+    query_accuracy: float,
+    relevant_token_retention: float,
+    distractor_suppression_ratio: float,
+    slow_query_coupling: float,
+    gate_selectivity: float,
+    match_selectivity: float,
+    query_key_alignment: float,
+    slot_write_focus: float,
+    slot_query_focus: float,
+    slot_utilization: float,
+    curriculum_enabled: bool,
+    curriculum_phase_1_delays: str,
+    curriculum_phase_2_delays: str,
+    curriculum_switch_generation: int,
+    curriculum_phase: str,
+    active_evaluation_delays: str,
+) -> ArchiveDescriptor:
+    del mean_score_over_delays, delay_score_std, slow_fast_contribution_ratio, enabled_conn_count
+    del retrieval_score, query_accuracy, relevant_token_retention, distractor_suppression_ratio, slow_query_coupling
+    del gate_selectivity, match_selectivity, query_key_alignment, curriculum_enabled, curriculum_phase_1_delays, curriculum_phase_2_delays, curriculum_switch_generation, curriculum_phase, active_evaluation_delays
+    normalized_score, score_bin, safe_score_ceiling = _normalized_score(final_max_score, score_ceiling)
+    combined_focus = max(0.0, min(1.0, 0.5 * (float(slot_write_focus) + float(slot_query_focus))))
+    focus_bin = _bin_value(combined_focus, upper_bound=1.0, bin_count=8)
+    descriptor_values_json = stable_json_dumps(
+        {
+            "qd_profile": QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
+            "descriptor_schema_version": ARCHIVE_DESCRIPTOR_VERSION_SLOT_RETRIEVAL_MECHANISM,
+            "score_value": round(float(final_max_score), 10),
+            "score_ceiling": round(safe_score_ceiling, 10),
+            "normalized_score": round(normalized_score, 10),
+            "score_bin": score_bin,
+            "score_bin_count": ARCHIVE_SCORE_BINS,
+            "slot_focus": round(combined_focus, 10),
+            "slot_focus_bin": focus_bin,
+            "slot_focus_bin_count": 8,
+            "slot_utilization": round(max(0.0, min(1.0, float(slot_utilization))), 10),
+        }
+    )
+    descriptor_key = f"scorebin_{score_bin}|slotfocusbin_{focus_bin}"
+    return ArchiveDescriptor(
+        qd_profile=QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
+        descriptor_schema_version=ARCHIVE_DESCRIPTOR_VERSION_SLOT_RETRIEVAL_MECHANISM,
+        descriptor_key=descriptor_key,
+        descriptor_values_json=descriptor_values_json,
+        score_bin=score_bin,
+        secondary_bin=focus_bin,
+    )
+
+
 def _normalized_score(final_max_score: float, score_ceiling: float) -> tuple[float, int, float]:
     safe_score_ceiling = max(float(score_ceiling), 1e-6)
     normalized_score = max(0.0, min(1.0, float(final_max_score) / safe_score_ceiling))
@@ -891,5 +961,15 @@ ARCHIVE_PROFILES: dict[str, ArchiveProfileDefinition] = {
         secondary_axis_bin_count=8,
         total_cells_per_delay=ARCHIVE_SCORE_BINS * 8,
         builder=_build_kv_retrieval_mechanism_descriptor,
+    ),
+    QD_PROFILE_SLOT_RETRIEVAL_MECHANISM: ArchiveProfileDefinition(
+        name=QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
+        descriptor_schema_version=ARCHIVE_DESCRIPTOR_VERSION_SLOT_RETRIEVAL_MECHANISM,
+        secondary_axis_label="slot_focus",
+        secondary_axis_value_key="slot_focus",
+        secondary_axis_bin_key="slot_focus_bin",
+        secondary_axis_bin_count=8,
+        total_cells_per_delay=ARCHIVE_SCORE_BINS * 8,
+        builder=_build_slot_retrieval_mechanism_descriptor,
     ),
 }

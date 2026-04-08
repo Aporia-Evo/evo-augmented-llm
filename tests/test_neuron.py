@@ -9,6 +9,7 @@ from evolve.custom_neuron import (
     StatefulNetworkExecutor,
     StatefulV2GatedNetworkExecutor,
     StatefulV3KVNetworkExecutor,
+    StatefulV4SlotsNetworkExecutor,
     StatefulV2NetworkExecutor,
     clamp_alpha,
     clamp_delta_weight,
@@ -244,6 +245,50 @@ def test_stateful_v3_kv_separates_key_and_value_state() -> None:
     assert metrics.store_vs_distractor_write_gap > 0.0
     assert metrics.match_at_query > 0.0
     assert metrics.query_value_read_strength > 0.0
+
+
+def test_stateful_v4_slots_reports_slot_metrics() -> None:
+    genome = GenomeModel(
+        input_ids=(0, 1, 4, 5, 6, 7),
+        output_ids=(2,),
+        nodes=(
+            NodeGeneModel(node_id=0, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(node_id=1, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(node_id=4, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(node_id=5, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(node_id=6, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(node_id=7, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(
+                node_id=2,
+                bias=0.0,
+                alpha=0.6,
+                alpha_slow=0.9,
+                content_w_key=1.0,
+                content_b_key=0.5,
+                content_w_query=1.0,
+                content_b_query=0.0,
+                content_temperature=1.2,
+                is_output=True,
+            ),
+        ),
+        connections=(
+            ConnectionGeneModel(in_id=0, out_id=2, historical_marker=0, weight=1.0, enabled=True, eta=0.0),
+            ConnectionGeneModel(in_id=1, out_id=2, historical_marker=1, weight=1.0, enabled=True, eta=0.0),
+            ConnectionGeneModel(in_id=7, out_id=2, historical_marker=2, weight=0.8, enabled=True, eta=0.0),
+        ),
+    )
+    executor = StatefulV4SlotsNetworkExecutor(activation_steps=1)
+    sequence = [
+        [1.0, 0.0, 1.0, 0.0, 0.0, 0.3],  # store key0
+        [1.0, 0.0, 0.0, 1.0, 0.0, 0.9],  # store key1
+        [0.0, 1.0, 1.0, 0.0, 0.0, 0.0],  # query key0
+    ]
+    executor.run_sequence(genome, sequence, step_roles=["store", "store", "query"])
+    metrics = executor.last_episode_metrics()
+    assert metrics.slot_key_separation >= 0.0
+    assert metrics.slot_value_separation >= 0.0
+    assert metrics.slot_query_focus >= 0.0
+    assert metrics.slot_utilization > 0.0
 
 
 def _single_connection_genome(

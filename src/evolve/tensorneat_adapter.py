@@ -13,6 +13,7 @@ import sympy as sp
 from config import AppConfig
 from evolve.plasticity import (
     is_content_gated_variant,
+    is_stateful_v4_slots_variant,
     is_stateful_v2_gated_variant,
     is_stateful_v3_kv_variant,
     is_stateful_v2_variant,
@@ -663,7 +664,11 @@ class TensorNEATAdapter:
         force_alpha_zero = config.run.variant == "stateless"
         enable_two_timescale = is_stateful_v2_variant(config.run.variant)
         enable_selective_gating = is_stateful_v2_gated_variant(config.run.variant)
-        enable_content_gating = is_content_gated_variant(config.run.variant) or is_stateful_v3_kv_variant(config.run.variant)
+        enable_content_gating = (
+            is_content_gated_variant(config.run.variant)
+            or is_stateful_v3_kv_variant(config.run.variant)
+            or is_stateful_v4_slots_variant(config.run.variant)
+        )
         plastic_mode = plastic_mode_for_variant(config.run.variant)
         fixed_plastic_d = plastic_fixed_d_for_variant(config.run.variant)
         plastic_d_lower_bound, plastic_d_upper_bound = plastic_d_bounds_for_variant(

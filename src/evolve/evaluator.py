@@ -21,6 +21,7 @@ from evolve.custom_neuron import (
     PlasticNetworkExecutor,
     PlasticityEpisodeMetrics,
     StatefulNetworkExecutor,
+    StatefulV4SlotsNetworkExecutor,
     StatefulV2GatedNetworkExecutor,
     StatefulV3KVNetworkExecutor,
     StatefulV2NetworkExecutor,
@@ -28,6 +29,7 @@ from evolve.custom_neuron import (
 from evolve.genome_codec import GenomeModel
 from evolve.plasticity import (
     is_content_gated_variant,
+    is_stateful_v4_slots_variant,
     is_stateful_v3_kv_variant,
     is_stateful_v2_gated_variant,
     is_stateful_v2_variant,
@@ -829,6 +831,8 @@ def _build_executor(
         return ContentGatedNetworkExecutor(activation_steps=activation_steps)
     if is_stateful_v3_kv_variant(variant):
         return StatefulV3KVNetworkExecutor(activation_steps=activation_steps)
+    if is_stateful_v4_slots_variant(variant):
+        return StatefulV4SlotsNetworkExecutor(activation_steps=activation_steps)
     plastic_mode = plastic_mode_for_variant(variant)
     if plastic_mode == "hebb":
         return PlasticNetworkExecutor(
@@ -903,6 +907,12 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
             "mean_match_signal": 0.0,
             "value_state_at_query": 0.0,
             "key_state_at_query": 0.0,
+            "slot_key_separation": 0.0,
+            "slot_value_separation": 0.0,
+            "slot_write_focus": 0.0,
+            "slot_query_focus": 0.0,
+            "slot_readout_selectivity": 0.0,
+            "slot_utilization": 0.0,
         }
     return {
         "plasticity_enabled": metrics.plasticity_enabled,
@@ -962,6 +972,12 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
         "mean_match_signal": metrics.mean_match_signal,
         "value_state_at_query": metrics.value_state_at_query,
         "key_state_at_query": metrics.key_state_at_query,
+        "slot_key_separation": metrics.slot_key_separation,
+        "slot_value_separation": metrics.slot_value_separation,
+        "slot_write_focus": metrics.slot_write_focus,
+        "slot_query_focus": metrics.slot_query_focus,
+        "slot_readout_selectivity": metrics.slot_readout_selectivity,
+        "slot_utilization": metrics.slot_utilization,
     }
 
 
@@ -1053,6 +1069,12 @@ def _aggregate_episode_metrics(metrics: Sequence[PlasticityEpisodeMetrics]) -> P
         mean_match_signal=float(np.mean([metric.mean_match_signal for metric in metrics])),
         value_state_at_query=float(np.mean([metric.value_state_at_query for metric in metrics])),
         key_state_at_query=float(np.mean([metric.key_state_at_query for metric in metrics])),
+        slot_key_separation=float(np.mean([metric.slot_key_separation for metric in metrics])),
+        slot_value_separation=float(np.mean([metric.slot_value_separation for metric in metrics])),
+        slot_write_focus=float(np.mean([metric.slot_write_focus for metric in metrics])),
+        slot_query_focus=float(np.mean([metric.slot_query_focus for metric in metrics])),
+        slot_readout_selectivity=float(np.mean([metric.slot_readout_selectivity for metric in metrics])),
+        slot_utilization=float(np.mean([metric.slot_utilization for metric in metrics])),
     )
 
 

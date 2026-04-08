@@ -34,6 +34,12 @@ SUMMARY_FEATURES = [
     "query_key_match_score",
     "value_margin",
     "distractor_competition_score",
+    "slot_key_separation",
+    "slot_value_separation",
+    "slot_write_focus",
+    "slot_query_focus",
+    "slot_readout_selectivity",
+    "slot_utilization",
     "mean_eta",
     "mean_plastic_d",
     "plastic_d_at_lower_bound_fraction",
@@ -246,6 +252,9 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
     mean_query_value_read_strength = _safe_mean([record.query_value_read_strength for record in records])
     mean_readout_selectivity = _safe_mean([record.readout_selectivity for record in records])
     mean_query_key_alignment_v11 = _safe_mean([record.query_key_alignment for record in records])
+    mean_slot_write_focus = _safe_mean([record.slot_write_focus for record in records])
+    mean_slot_query_focus = _safe_mean([record.slot_query_focus for record in records])
+    mean_slot_utilization = _safe_mean([record.slot_utilization for record in records])
     mean_score_over_delays = _safe_mean([record.mean_score_over_delays for record in records])
     mean_delay_score_std = _safe_mean([record.delay_score_std for record in records])
     mean_delay_score_range = _safe_mean([record.delay_score_range for record in records])
@@ -356,6 +365,13 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
             hints.append("Der slow-state-Zweig koppelt sichtbar in die Query-Phase ein; Retrieval wirkt nicht rein fast-state-getrieben.")
         else:
             hints.append("Der Query-Pfad bleibt eher fast-state-nah; slow-state-Retrieval ist noch nicht dominant ausgepraegt.")
+
+        if mean_slot_write_focus >= 0.1 and mean_slot_query_focus >= 0.1:
+            hints.append("Der Slot-Pfad zeigt fokussiertes Schreiben und Query-Selektion; stateful_v4_slots wirkt funktional getrennt.")
+        elif mean_slot_utilization <= 0.6:
+            hints.append("Slot-Nutzung ist unausgewogen; mindestens ein Slot bleibt oft ungenutzt und begrenzt die Retrieval-Kapazitaet.")
+        else:
+            hints.append("Slot-Pfad ist aktiv, aber Fokus bleibt weich; die Slot-Entscheidung ist noch nicht deutlich genug separiert.")
 
     if phase_one_records and phase_two_records:
         phase_one_score = _safe_mean([record.score_current_phase for record in phase_one_records])

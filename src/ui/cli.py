@@ -62,6 +62,7 @@ VARIANT_CHOICES = [
     "stateful_v2",
     "stateful_v2_gated",
     "stateful_v3_kv",
+    "stateful_v4_slots",
     "content_gated",
     "stateless",
     "stateful_plastic",
@@ -159,6 +160,10 @@ class GenerationBenchmarkRow:
     distractor_competition_score: float | None = None
     store_vs_distractor_write_gap: float | None = None
     query_value_read_strength: float | None = None
+    slot_write_focus: float | None = None
+    slot_query_focus: float | None = None
+    slot_readout_selectivity: float | None = None
+    slot_utilization: float | None = None
 
 
 @dataclass(frozen=True)
@@ -190,6 +195,10 @@ class GenerationSuiteAggregate:
     mean_distractor_competition_score: float | None = None
     mean_store_vs_distractor_write_gap: float | None = None
     mean_query_value_read_strength: float | None = None
+    mean_slot_write_focus: float | None = None
+    mean_slot_query_focus: float | None = None
+    mean_slot_readout_selectivity: float | None = None
+    mean_slot_utilization: float | None = None
 
 
 class CliObserver:
@@ -477,7 +486,7 @@ def build_parser() -> argparse.ArgumentParser:
     curriculum_compare_parser.add_argument("--task", choices=TASK_CHOICES, default="bit_memory")
     curriculum_compare_parser.add_argument(
         "--variants",
-        default="stateful,stateful_v2,stateful_v2_gated,stateful_v3_kv,content_gated,stateful_plastic_hebb",
+        default="stateful,stateful_v2,stateful_v2_gated,stateful_v3_kv,stateful_v4_slots,content_gated,stateful_plastic_hebb",
         help="Comma-separated variants to include in the comparison report.",
     )
     curriculum_compare_parser.add_argument(
@@ -1203,6 +1212,10 @@ def _build_generation_benchmark_row(
         distractor_competition_score=_coerce_optional_metric(best_candidate_metrics.get("distractor_competition_score")),
         store_vs_distractor_write_gap=_coerce_optional_metric(best_candidate_metrics.get("store_vs_distractor_write_gap")),
         query_value_read_strength=_coerce_optional_metric(best_candidate_metrics.get("query_value_read_strength")),
+        slot_write_focus=_coerce_optional_metric(best_candidate_metrics.get("slot_write_focus")),
+        slot_query_focus=_coerce_optional_metric(best_candidate_metrics.get("slot_query_focus")),
+        slot_readout_selectivity=_coerce_optional_metric(best_candidate_metrics.get("slot_readout_selectivity")),
+        slot_utilization=_coerce_optional_metric(best_candidate_metrics.get("slot_utilization")),
     )
 
 
@@ -1332,6 +1345,12 @@ def _build_generation_suite_aggregates(rows: list[GenerationBenchmarkRow]) -> li
             for row in grouped_rows
             if row.query_value_read_strength is not None
         ]
+        slot_write_focus_values = [float(row.slot_write_focus) for row in grouped_rows if row.slot_write_focus is not None]
+        slot_query_focus_values = [float(row.slot_query_focus) for row in grouped_rows if row.slot_query_focus is not None]
+        slot_readout_selectivity_values = [
+            float(row.slot_readout_selectivity) for row in grouped_rows if row.slot_readout_selectivity is not None
+        ]
+        slot_utilization_values = [float(row.slot_utilization) for row in grouped_rows if row.slot_utilization is not None]
         aggregates.append(
             GenerationSuiteAggregate(
                 task_name=task_name,
@@ -1397,6 +1416,26 @@ def _build_generation_suite_aggregates(rows: list[GenerationBenchmarkRow]) -> li
                     if query_value_read_strengths
                     else None
                 ),
+                mean_slot_write_focus=(
+                    (sum(slot_write_focus_values) / len(slot_write_focus_values))
+                    if slot_write_focus_values
+                    else None
+                ),
+                mean_slot_query_focus=(
+                    (sum(slot_query_focus_values) / len(slot_query_focus_values))
+                    if slot_query_focus_values
+                    else None
+                ),
+                mean_slot_readout_selectivity=(
+                    (sum(slot_readout_selectivity_values) / len(slot_readout_selectivity_values))
+                    if slot_readout_selectivity_values
+                    else None
+                ),
+                mean_slot_utilization=(
+                    (sum(slot_utilization_values) / len(slot_utilization_values))
+                    if slot_utilization_values
+                    else None
+                ),
             )
         )
     return aggregates
@@ -1452,6 +1491,10 @@ def _write_generation_suite_exports(
                 "mean_distractor_competition_score",
                 "mean_store_vs_distractor_write_gap",
                 "mean_query_value_read_strength",
+                "mean_slot_write_focus",
+                "mean_slot_query_focus",
+                "mean_slot_readout_selectivity",
+                "mean_slot_utilization",
             ],
         )
         writer.writeheader()
@@ -1661,6 +1704,39 @@ def _render_generation_suite_markdown(
                             aggregate.variant,
                             _format_optional_float(aggregate.mean_store_vs_distractor_write_gap, precision=3),
                             _format_optional_float(aggregate.mean_query_value_read_strength, precision=3),
+                        ]
+                    )
+                    + " |"
+                    for aggregate in retrieval_diagnostic_aggregates
+                ]
+            )
+            sections.append("")
+        if any(
+            aggregate.mean_slot_write_focus is not None
+            or aggregate.mean_slot_query_focus is not None
+            or aggregate.mean_slot_readout_selectivity is not None
+            for aggregate in retrieval_diagnostic_aggregates
+        ):
+            sections.extend(
+                [
+                    "## Slot Retrieval Diagnostics",
+                    "",
+                    "| task | delay | variant | mean_slot_write_focus | mean_slot_query_focus | mean_slot_readout_selectivity | mean_slot_utilization |",
+                    "| --- | --- | --- | --- | --- | --- | --- |",
+                ]
+            )
+            sections.extend(
+                [
+                    "| "
+                    + " | ".join(
+                        [
+                            aggregate.task_name,
+                            aggregate.evaluation_delay_steps_label or str(aggregate.delay_steps),
+                            aggregate.variant,
+                            _format_optional_float(aggregate.mean_slot_write_focus, precision=3),
+                            _format_optional_float(aggregate.mean_slot_query_focus, precision=3),
+                            _format_optional_float(aggregate.mean_slot_readout_selectivity, precision=3),
+                            _format_optional_float(aggregate.mean_slot_utilization, precision=3),
                         ]
                     )
                     + " |"

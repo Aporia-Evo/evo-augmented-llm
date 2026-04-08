@@ -18,6 +18,7 @@ from evolve.archive import (
     QD_PROFILE_CONTENT_RETRIEVAL,
     QD_PROFILE_GATING_MECHANISM,
     QD_PROFILE_KV_RETRIEVAL_MECHANISM,
+    QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
     QD_PROFILE_RETRIEVAL_MECHANISM,
     QD_PROFILE_RETRIEVAL_STRATEGY,
     build_archive_cell,
@@ -168,6 +169,28 @@ def test_archive_descriptor_binning_is_deterministic_for_kv_retrieval_mechanism(
     assert first == second
     assert first.qd_profile == QD_PROFILE_KV_RETRIEVAL_MECHANISM
     assert "writegapbin_" in first.descriptor_key
+
+
+def test_archive_descriptor_binning_is_deterministic_for_slot_retrieval_mechanism() -> None:
+    first = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        slot_write_focus=0.4,
+        slot_query_focus=0.6,
+        slot_utilization=1.0,
+        qd_profile=QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
+    )
+    second = build_archive_descriptor(
+        final_max_score=3.9,
+        score_ceiling=4.0,
+        slot_write_focus=0.4,
+        slot_query_focus=0.6,
+        slot_utilization=1.0,
+        qd_profile=QD_PROFILE_SLOT_RETRIEVAL_MECHANISM,
+    )
+    assert first == second
+    assert first.qd_profile == QD_PROFILE_SLOT_RETRIEVAL_MECHANISM
+    assert "slotfocusbin_" in first.descriptor_key
 
 
 def test_general_compactness_builds_for_all_variants() -> None:

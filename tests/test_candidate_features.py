@@ -191,6 +191,12 @@ def test_extract_candidate_features_captures_retrieval_metrics() -> None:
         "mean_match_signal": 0.44,
         "value_state_at_query": 0.92,
         "key_state_at_query": 1.31,
+        "slot_key_separation": 0.22,
+        "slot_value_separation": 0.37,
+        "slot_write_focus": 0.41,
+        "slot_query_focus": 0.53,
+        "slot_readout_selectivity": 0.26,
+        "slot_utilization": 1.0,
     }
 
     feature, _vector = extract_candidate_features(genome, raw_metrics, context)
@@ -223,6 +229,9 @@ def test_extract_candidate_features_captures_retrieval_metrics() -> None:
     assert feature.store_vs_distractor_write_gap == 0.51
     assert feature.query_value_read_strength == 0.6
     assert feature.write_gate_at_store == 0.72
+    assert feature.slot_write_focus == 0.41
+    assert feature.slot_query_focus == 0.53
+    assert feature.slot_utilization == 1.0
 
 
 def test_in_memory_repository_stores_feature_values_and_hof_flag() -> None:

@@ -119,6 +119,12 @@ class PlasticityEpisodeMetrics:
     mean_match_signal: float = 0.0
     value_state_at_query: float = 0.0
     key_state_at_query: float = 0.0
+    slot_key_separation: float = 0.0
+    slot_value_separation: float = 0.0
+    slot_write_focus: float = 0.0
+    slot_query_focus: float = 0.0
+    slot_readout_selectivity: float = 0.0
+    slot_utilization: float = 0.0
 
 
 def _incoming_connections_by_target(genome: GenomeModel) -> dict[int, list[ConnectionGeneModel]]:
@@ -695,6 +701,120 @@ class StatefulV3KVNetworkExecutor(StatefulNetworkExecutor):
             value_state_at_query=float(np.mean(value_state_query_vals)) if value_state_query_vals else 0.0,
             key_state_at_query=float(np.mean(key_state_query_vals)) if key_state_query_vals else 0.0,
             match_at_query=float(np.mean(match_query_vals)) if match_query_vals else 0.0,
+        )
+        return np.vstack(sequence_outputs)
+
+    def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
+        return self._last_metrics
+
+
+class StatefulV4SlotsNetworkExecutor(StatefulNetworkExecutor):
+    def __init__(self, activation_steps: int) -> None:
+        super().__init__(activation_steps=activation_steps)
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+        )
+
+    def run_sequence(
+        self,
+        genome: GenomeModel,
+        input_sequence: Sequence[Sequence[float]],
+        *,
+        step_roles: Sequence[str] | None = None,
+    ) -> np.ndarray:
+        incoming_by_target = _incoming_connections_by_target(genome)
+        slot_count = 2
+        slot_keys = {node.node_id: [0.0 for _ in range(slot_count)] for node in genome.nodes if not node.is_input}
+        slot_values = {node.node_id: [0.0 for _ in range(slot_count)] for node in genome.nodes if not node.is_input}
+        outputs = {node.node_id: 0.0 for node in genome.nodes}
+        sequence_outputs: list[np.ndarray] = []
+        write_focus_vals: list[float] = []
+        query_focus_vals: list[float] = []
+        readout_selectivity_vals: list[float] = []
+        slot_key_sep_vals: list[float] = []
+        slot_value_sep_vals: list[float] = []
+        slot_hits = [0, 0]
+
+        for step_index, inputs in enumerate(input_sequence):
+            step_role = _step_role_at(step_roles, step_index)
+            input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
+            outputs.update(input_map)
+            query_signal = float(inputs[1]) if len(inputs) > 1 else 0.0
+            store_signal = float(inputs[0]) if len(inputs) > 0 else 0.0
+            key_bits = np.asarray([float(inputs[4]), float(inputs[5]), float(inputs[6])] if len(inputs) > 6 else [0.0, 0.0, 0.0])
+            key_index = int(np.argmax(key_bits)) if float(np.sum(key_bits)) > 0.0 else 0
+            active_slot = int(key_index % slot_count)
+            slot_hits[active_slot] += 1
+            for _ in range(self.activation_steps):
+                previous_outputs = dict(outputs)
+                next_outputs = dict(input_map)
+                for node in genome.nodes:
+                    if node.is_input:
+                        continue
+                    summed_input = 0.0
+                    for conn in incoming_by_target.get(node.node_id, ()):
+                        summed_input += conn.weight * previous_outputs.get(conn.in_id, 0.0)
+                    input_norm = summed_input / (1.0 + abs(summed_input))
+                    write_gate = 1.0 / (1.0 + math.exp(-((node.content_w_key * input_norm) + (node.content_b_key * store_signal))))
+                    value_gate = 1.0 / (1.0 + math.exp(-((node.content_w_query * input_norm) + node.content_b_query)))
+                    for slot_index in range(slot_count):
+                        slot_mask = 1.0 if slot_index == active_slot else 0.0
+                        decay = clamp_alpha(node.alpha if slot_index == 0 else node.alpha_slow)
+                        slot_keys[node.node_id][slot_index] = (
+                            decay * slot_keys[node.node_id][slot_index]
+                            + (write_gate * store_signal * slot_mask * input_norm)
+                        )
+                        slot_values[node.node_id][slot_index] = (
+                            decay * slot_values[node.node_id][slot_index]
+                            + (value_gate * store_signal * slot_mask * (summed_input + node.slow_output_gain))
+                        )
+                    query_key = query_signal * input_norm
+                    logits = np.asarray(
+                        [node.content_temperature * query_key * slot_keys[node.node_id][slot_idx] for slot_idx in range(slot_count)],
+                        dtype=np.float64,
+                    )
+                    logits = logits - float(np.max(logits))
+                    probs = np.exp(logits)
+                    denom = float(np.sum(probs))
+                    weights = probs / denom if denom > 0.0 else np.asarray([0.5, 0.5], dtype=np.float64)
+                    readout = float(np.sum(weights * np.asarray(slot_values[node.node_id], dtype=np.float64)))
+                    next_outputs[node.node_id] = math.tanh(summed_input + readout)
+                    if step_role == "store":
+                        write_focus_vals.append(abs(slot_keys[node.node_id][0] - slot_keys[node.node_id][1]))
+                    if step_role == "query":
+                        query_focus_vals.append(abs(float(weights[0]) - float(weights[1])))
+                        readout_selectivity_vals.append(abs(readout))
+                    slot_key_sep_vals.append(abs(slot_keys[node.node_id][0] - slot_keys[node.node_id][1]))
+                    slot_value_sep_vals.append(abs(slot_values[node.node_id][0] - slot_values[node.node_id][1]))
+                outputs = next_outputs
+            sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
+
+        total_hits = max(1, slot_hits[0] + slot_hits[1])
+        utilization = len([hit for hit in slot_hits if hit > 0]) / slot_count
+        self._last_metrics = PlasticityEpisodeMetrics(
+            plasticity_enabled=False,
+            mean_abs_delta_w=0.0,
+            max_abs_delta_w=0.0,
+            clamp_hit_rate=0.0,
+            plasticity_active_fraction=0.0,
+            mean_abs_decay_term=0.0,
+            max_abs_decay_term=0.0,
+            decay_effect_ratio=0.0,
+            decay_near_zero_fraction=0.0,
+            slot_key_separation=float(np.mean(slot_key_sep_vals)) if slot_key_sep_vals else 0.0,
+            slot_value_separation=float(np.mean(slot_value_sep_vals)) if slot_value_sep_vals else 0.0,
+            slot_write_focus=float(np.mean(write_focus_vals)) if write_focus_vals else 0.0,
+            slot_query_focus=float(np.mean(query_focus_vals)) if query_focus_vals else 0.0,
+            slot_readout_selectivity=float(np.mean(readout_selectivity_vals)) if readout_selectivity_vals else 0.0,
+            slot_utilization=max(utilization, min(slot_hits) / total_hits),
         )
         return np.vstack(sequence_outputs)
 
