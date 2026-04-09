@@ -163,6 +163,10 @@ class PlasticityEpisodeMetrics:
     memory_read_strength: float = 0.0
     key_query_cosine_mean: float = 0.0
     key_query_cosine_at_query: float = 0.0
+    key_variance_mean: float = 0.0
+    query_variance_mean: float = 0.0
+    key_query_projection_strength: float = 0.0
+    query_decoupling_magnitude: float = 0.0
 
 
 def _incoming_connections_by_target(genome: GenomeModel) -> dict[int, list[ConnectionGeneModel]]:
@@ -1102,6 +1106,10 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         readout_contrast_vals: list[float] = []
         key_query_cosine_vals: list[float] = []
         key_query_cosine_query_vals: list[float] = []
+        key_variance_vals: list[float] = []
+        query_variance_vals: list[float] = []
+        key_query_projection_vals: list[float] = []
+        query_decoupling_vals: list[float] = []
 
         for step_index, inputs in enumerate(input_sequence):
             step_role = _step_role_at(step_roles, step_index)
@@ -1169,16 +1177,20 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         + (0.24 * np.tanh((query_core * position_axis) - (0.25 * key_seed * harmonic_cos)))
                         + (0.14 * np.tanh((query_seed + node.content_b_query) * harmonic_sin))
                     )
-                    k_centered = k_raw - float(np.mean(k_raw))
-                    q_centered = q_raw - float(np.mean(q_raw))
-                    key_center_energy = float(np.dot(k_centered, k_centered)) + 1e-9
-                    q_on_k_proj = float(np.dot(q_centered, k_centered)) / key_center_energy
-                    bounded_proj = max(-0.35, min(0.35, q_on_k_proj))
-                    q_raw = q_raw - (0.25 * bounded_proj * k_centered)
                     k_raw = np.maximum(k_raw, 1e-3)
                     q_raw = np.maximum(q_raw, 1e-3)
                     k_t = _positive_sum_normalize(k_raw)
-                    q_t = _positive_sum_normalize(q_raw)
+                    q_t_base = _positive_sum_normalize(q_raw)
+                    k_centered = k_t - float(np.mean(k_t))
+                    q_centered = q_t_base - float(np.mean(q_t_base))
+                    key_center_norm = float(np.linalg.norm(k_centered))
+                    key_center_energy = float(np.dot(k_centered, k_centered)) + 1e-9
+                    raw_projection_coeff = float(np.dot(q_centered, k_centered)) / key_center_energy
+                    bounded_projection_coeff = 0.4 * math.tanh(raw_projection_coeff / 0.4)
+                    projection_magnitude = abs(float(np.dot(q_centered, k_centered))) / (key_center_norm + 1e-9)
+                    deflation_vector = 0.35 * bounded_projection_coeff * k_centered
+                    q_decoupled = q_t_base - deflation_vector
+                    q_t = _positive_sum_normalize(np.maximum(q_decoupled, 1e-6))
                     v_t = np.asarray(
                         [
                             math.tanh(
@@ -1238,6 +1250,10 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
                     key_norm_vals.append(float(np.linalg.norm(k_t)))
                     query_norm_vals.append(float(np.linalg.norm(q_t)))
+                    key_variance_vals.append(float(np.var(k_t)))
+                    query_variance_vals.append(float(np.var(q_t)))
+                    key_query_projection_vals.append(projection_magnitude)
+                    query_decoupling_vals.append(float(np.linalg.norm(deflation_vector)))
                     key_query_cos = float(np.dot(q_t, k_t) / (np.linalg.norm(q_t) * np.linalg.norm(k_t) + 1e-9))
                     key_query_cosine_vals.append(key_query_cos)
                     value_norm_vals.append(float(np.linalg.norm(v_t)))
@@ -1287,6 +1303,10 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
             memory_read_strength=float(np.mean(memory_read_vals)) if memory_read_vals else 0.0,
             key_query_cosine_mean=float(np.mean(key_query_cosine_vals)) if key_query_cosine_vals else 0.0,
             key_query_cosine_at_query=float(np.mean(key_query_cosine_query_vals)) if key_query_cosine_query_vals else 0.0,
+            key_variance_mean=float(np.mean(key_variance_vals)) if key_variance_vals else 0.0,
+            query_variance_mean=float(np.mean(query_variance_vals)) if query_variance_vals else 0.0,
+            key_query_projection_strength=float(np.mean(key_query_projection_vals)) if key_query_projection_vals else 0.0,
+            query_decoupling_magnitude=float(np.mean(query_decoupling_vals)) if query_decoupling_vals else 0.0,
             readout_selectivity=float(np.mean(readout_selectivity_vals)) if readout_selectivity_vals else 0.0,
             mean_match_signal=float(np.mean(novelty_ratio_vals)) if novelty_ratio_vals else 0.0,
             query_value_read_strength=float(np.mean(readout_contrast_vals)) if readout_contrast_vals else 0.0,

@@ -11,7 +11,7 @@ from evolve.genome_codec import GenomeModel
 from utils.serialization import stable_json_dumps
 
 
-FEATURE_VERSION = "candidate-features-v10"
+FEATURE_VERSION = "candidate-features-v11"
 BOUND_TOLERANCE = 1e-6
 
 
@@ -221,6 +221,10 @@ def extract_candidate_features(
         memory_read_strength=_coerce_float(metrics.get("memory_read_strength")),
         key_query_cosine_mean=_coerce_float(metrics.get("key_query_cosine_mean")),
         key_query_cosine_at_query=_coerce_float(metrics.get("key_query_cosine_at_query")),
+        key_variance_mean=_coerce_float(metrics.get("key_variance_mean")),
+        query_variance_mean=_coerce_float(metrics.get("query_variance_mean")),
+        key_query_projection_strength=_coerce_float(metrics.get("key_query_projection_strength")),
+        query_decoupling_magnitude=_coerce_float(metrics.get("query_decoupling_magnitude")),
     )
     vector = _feature_vector_from_record(feature)
     return feature, vector
@@ -354,6 +358,10 @@ def _feature_vector_from_record(record: CandidateFeatureRecord) -> CandidateFeat
         record.memory_read_strength,
         record.key_query_cosine_mean,
         record.key_query_cosine_at_query,
+        record.key_variance_mean,
+        record.query_variance_mean,
+        record.key_query_projection_strength,
+        record.query_decoupling_magnitude,
     ]
     array = np.asarray(vector, dtype=np.float64)
     norm_l2 = float(np.linalg.norm(array))

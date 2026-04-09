@@ -947,6 +947,10 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
             "memory_read_strength": 0.0,
             "key_query_cosine_mean": 0.0,
             "key_query_cosine_at_query": 0.0,
+            "key_variance_mean": 0.0,
+            "query_variance_mean": 0.0,
+            "key_query_projection_strength": 0.0,
+            "query_decoupling_magnitude": 0.0,
         }
     return {
         "plasticity_enabled": metrics.plasticity_enabled,
@@ -1038,6 +1042,10 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
         "memory_read_strength": metrics.memory_read_strength,
         "key_query_cosine_mean": metrics.key_query_cosine_mean,
         "key_query_cosine_at_query": metrics.key_query_cosine_at_query,
+        "key_variance_mean": metrics.key_variance_mean,
+        "query_variance_mean": metrics.query_variance_mean,
+        "key_query_projection_strength": metrics.key_query_projection_strength,
+        "query_decoupling_magnitude": metrics.query_decoupling_magnitude,
     }
 
 
@@ -1161,6 +1169,10 @@ def _aggregate_episode_metrics(metrics: Sequence[PlasticityEpisodeMetrics]) -> P
         memory_read_strength=float(np.mean([metric.memory_read_strength for metric in metrics])),
         key_query_cosine_mean=float(np.mean([metric.key_query_cosine_mean for metric in metrics])),
         key_query_cosine_at_query=float(np.mean([metric.key_query_cosine_at_query for metric in metrics])),
+        key_variance_mean=float(np.mean([metric.key_variance_mean for metric in metrics])),
+        query_variance_mean=float(np.mean([metric.query_variance_mean for metric in metrics])),
+        key_query_projection_strength=float(np.mean([metric.key_query_projection_strength for metric in metrics])),
+        query_decoupling_magnitude=float(np.mean([metric.query_decoupling_magnitude for metric in metrics])),
     )
 
 

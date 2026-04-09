@@ -319,6 +319,10 @@ class CandidateFeatureRecord:
     memory_read_strength: float = 0.0
     key_query_cosine_mean: float = 0.0
     key_query_cosine_at_query: float = 0.0
+    key_variance_mean: float = 0.0
+    query_variance_mean: float = 0.0
+    key_query_projection_strength: float = 0.0
+    query_decoupling_magnitude: float = 0.0
 
 
 @dataclass(frozen=True)
