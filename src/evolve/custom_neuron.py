@@ -1093,6 +1093,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         delta_correction_vals: list[float] = []
         memory_read_vals: list[float] = []
         readout_selectivity_vals: list[float] = []
+        novelty_ratio_vals: list[float] = []
+        readout_contrast_vals: list[float] = []
 
         for step_index, inputs in enumerate(input_sequence):
             step_role = _step_role_at(step_roles, step_index)
@@ -1133,8 +1135,6 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             )
                         )
                     )
-                    beta_t = beta_base * (0.15 + (0.85 * store_signal)) * (1.0 - (0.5 * query_signal))
-                    beta_t = min(0.98, max(0.02, beta_t))
                     key_core = (
                         key_seed * (0.9 + (0.5 * center_peak))
                         + (0.6 * node.content_b_key * position_axis)
@@ -1175,6 +1175,19 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     decayed_state = memory_decay * state
                     v_hat_t = decayed_state @ k_t
                     delta_t = v_t - v_hat_t
+                    raw_delta_norm = float(np.linalg.norm(delta_t))
+                    value_norm = float(np.linalg.norm(v_t))
+                    novelty_ratio = raw_delta_norm / (value_norm + 1e-6)
+                    novelty_signal = novelty_ratio / (1.0 + novelty_ratio)
+                    key_query_asym = abs(key_seed) / (abs(key_seed) + abs(query_seed) + 1e-6)
+                    beta_mix = (
+                        (0.45 * beta_base)
+                        + (0.25 * store_signal)
+                        + (0.2 * novelty_signal)
+                        + (0.1 * key_query_asym)
+                    )
+                    beta_t = beta_mix * (1.0 - (0.35 * query_signal))
+                    beta_t = min(0.95, max(0.03, beta_t))
                     delta_t = _clip_vector_norm(delta_t, max_norm=delta_clip_norm)
                     update = beta_t * np.outer(delta_t, k_t)
                     update_norm = float(np.linalg.norm(update, ord="fro"))
@@ -1190,8 +1203,14 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     q_focus = np.exp(q_focus_logits)
                     q_focus = q_focus / (float(np.sum(q_focus)) + 1e-9)
                     read_mean = float(np.mean(read_t))
+                    read_abs_mean = float(np.mean(np.abs(read_t)))
                     selective_readout = float(np.dot(read_t, q_focus))
-                    readout = (0.35 * read_mean) + (0.65 * selective_readout)
+                    read_contrast = float(np.max(read_t) - np.min(read_t))
+                    readout = (
+                        (0.25 * read_mean)
+                        + (0.55 * selective_readout)
+                        + (0.2 * math.tanh(read_contrast) * (2.0 * query_signal - 1.0))
+                    )
                     read_gain = max(
                         0.25,
                         min(
@@ -1208,7 +1227,9 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     delta_mag = float(np.linalg.norm(delta_t))
                     delta_correction_vals.append(delta_mag)
                     memory_read_vals.append(float(np.linalg.norm(read_t)))
-                    readout_selectivity_vals.append(float(np.max(q_focus) - np.mean(q_focus)))
+                    readout_selectivity_vals.append(abs(selective_readout - read_mean) / (read_abs_mean + 1e-6))
+                    novelty_ratio_vals.append(novelty_ratio)
+                    readout_contrast_vals.append(read_contrast)
                     if step_role == "store":
                         beta_store_vals.append(beta_t)
                         store_update_vals.append(float(np.linalg.norm(update, ord="fro")))
@@ -1245,6 +1266,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
             delta_correction_magnitude=float(np.mean(delta_correction_vals)) if delta_correction_vals else 0.0,
             memory_read_strength=float(np.mean(memory_read_vals)) if memory_read_vals else 0.0,
             readout_selectivity=float(np.mean(readout_selectivity_vals)) if readout_selectivity_vals else 0.0,
+            mean_match_signal=float(np.mean(novelty_ratio_vals)) if novelty_ratio_vals else 0.0,
+            query_value_read_strength=float(np.mean(readout_contrast_vals)) if readout_contrast_vals else 0.0,
         )
         return np.vstack(sequence_outputs)
 
