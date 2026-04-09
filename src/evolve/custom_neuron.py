@@ -161,6 +161,8 @@ class PlasticityEpisodeMetrics:
     store_memory_update_strength: float = 0.0
     delta_correction_magnitude: float = 0.0
     memory_read_strength: float = 0.0
+    key_query_cosine_mean: float = 0.0
+    key_query_cosine_at_query: float = 0.0
 
 
 def _incoming_connections_by_target(genome: GenomeModel) -> dict[int, list[ConnectionGeneModel]]:
@@ -1075,6 +1077,9 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         alt_sign = np.where(np.arange(d_key) % 2 == 0, 1.0, -1.0).astype(np.float64)
         center_peak = 1.0 - np.abs(position_axis)
         centered_square = (position_axis**2) - float(np.mean(position_axis**2))
+        edge_peak = np.abs(position_axis)
+        harmonic_sin = np.sin(np.pi * position_axis)
+        harmonic_cos = np.cos(np.pi * position_axis)
         memory_state = {
             node.node_id: np.zeros((d_value, d_key), dtype=np.float64) for node in genome.nodes if not node.is_input
         }
@@ -1095,6 +1100,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         readout_selectivity_vals: list[float] = []
         novelty_ratio_vals: list[float] = []
         readout_contrast_vals: list[float] = []
+        key_query_cosine_vals: list[float] = []
+        key_query_cosine_query_vals: list[float] = []
 
         for step_index, inputs in enumerate(input_sequence):
             step_role = _step_role_at(step_roles, step_index)
@@ -1136,28 +1143,38 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         )
                     )
                     key_core = (
-                        key_seed * (0.9 + (0.5 * center_peak))
+                        key_seed * (0.95 + (0.65 * center_peak))
                         + (0.6 * node.content_b_key * position_axis)
                         + (0.35 * node.content_w_key * alt_sign)
+                        + (0.2 * key_seed * harmonic_cos)
                     )
-                    key_cross = 0.25 * query_seed * position_axis * alt_sign
+                    key_cross = 0.18 * query_seed * (0.6 * position_axis + 0.4 * alt_sign)
                     k_raw = (
                         1.0
-                        + (0.45 * np.tanh(key_core))
-                        + (0.35 * np.tanh((key_core * alt_sign) + (0.5 * key_cross)))
-                        + (0.2 * np.tanh((key_seed - query_seed) * (center_peak - 0.5)))
+                        + (0.5 * np.tanh(key_core))
+                        + (0.3 * np.tanh((key_core * alt_sign) + key_cross))
+                        + (0.22 * np.tanh((key_seed - query_seed) * (center_peak - edge_peak)))
+                        + (0.12 * np.tanh((key_seed + node.content_b_key) * harmonic_cos))
                     )
                     query_core = (
-                        query_seed * (0.8 - (0.4 * center_peak))
+                        query_seed * (0.95 + (0.7 * edge_peak))
                         - (0.55 * node.content_b_query * position_axis)
                         + (0.4 * node.content_w_query * centered_square)
+                        + (0.25 * query_seed * harmonic_sin)
                     )
                     q_raw = (
                         1.0
-                        + (0.5 * np.tanh(query_core + (0.3 * alt_sign)))
-                        + (0.3 * np.tanh((query_seed - key_seed) * (position_axis * alt_sign)))
-                        + (0.25 * np.tanh((query_core * position_axis) - (0.2 * key_seed * alt_sign)))
+                        + (0.52 * np.tanh(query_core + (0.25 * alt_sign)))
+                        + (0.34 * np.tanh((query_seed - key_seed) * ((1.1 * edge_peak) + (0.4 * alt_sign))))
+                        + (0.24 * np.tanh((query_core * position_axis) - (0.25 * key_seed * harmonic_cos)))
+                        + (0.14 * np.tanh((query_seed + node.content_b_query) * harmonic_sin))
                     )
+                    k_centered = k_raw - float(np.mean(k_raw))
+                    q_centered = q_raw - float(np.mean(q_raw))
+                    key_center_energy = float(np.dot(k_centered, k_centered)) + 1e-9
+                    q_on_k_proj = float(np.dot(q_centered, k_centered)) / key_center_energy
+                    bounded_proj = max(-0.35, min(0.35, q_on_k_proj))
+                    q_raw = q_raw - (0.25 * bounded_proj * k_centered)
                     k_raw = np.maximum(k_raw, 1e-3)
                     q_raw = np.maximum(q_raw, 1e-3)
                     k_t = _positive_sum_normalize(k_raw)
@@ -1221,6 +1238,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
                     key_norm_vals.append(float(np.linalg.norm(k_t)))
                     query_norm_vals.append(float(np.linalg.norm(q_t)))
+                    key_query_cos = float(np.dot(q_t, k_t) / (np.linalg.norm(q_t) * np.linalg.norm(k_t) + 1e-9))
+                    key_query_cosine_vals.append(key_query_cos)
                     value_norm_vals.append(float(np.linalg.norm(v_t)))
                     memory_norm_vals.append(float(np.linalg.norm(new_state, ord="fro")))
                     beta_vals.append(beta_t)
@@ -1237,7 +1256,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         beta_distractor_vals.append(beta_t)
                     elif step_role == "query":
                         beta_query_vals.append(beta_t)
-                        query_alignment_vals.append(float(np.dot(q_t, k_t) / (np.linalg.norm(q_t) * np.linalg.norm(k_t) + 1e-9)))
+                        query_alignment_vals.append(key_query_cos)
+                        key_query_cosine_query_vals.append(key_query_cos)
                 outputs = next_outputs
             sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
         mean_store_beta = float(np.mean(beta_store_vals)) if beta_store_vals else 0.0
@@ -1265,6 +1285,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
             store_memory_update_strength=float(np.mean(store_update_vals)) if store_update_vals else 0.0,
             delta_correction_magnitude=float(np.mean(delta_correction_vals)) if delta_correction_vals else 0.0,
             memory_read_strength=float(np.mean(memory_read_vals)) if memory_read_vals else 0.0,
+            key_query_cosine_mean=float(np.mean(key_query_cosine_vals)) if key_query_cosine_vals else 0.0,
+            key_query_cosine_at_query=float(np.mean(key_query_cosine_query_vals)) if key_query_cosine_query_vals else 0.0,
             readout_selectivity=float(np.mean(readout_selectivity_vals)) if readout_selectivity_vals else 0.0,
             mean_match_signal=float(np.mean(novelty_ratio_vals)) if novelty_ratio_vals else 0.0,
             query_value_read_strength=float(np.mean(readout_contrast_vals)) if readout_contrast_vals else 0.0,

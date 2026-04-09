@@ -945,6 +945,8 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
             "store_memory_update_strength": 0.0,
             "delta_correction_magnitude": 0.0,
             "memory_read_strength": 0.0,
+            "key_query_cosine_mean": 0.0,
+            "key_query_cosine_at_query": 0.0,
         }
     return {
         "plasticity_enabled": metrics.plasticity_enabled,
@@ -1034,6 +1036,8 @@ def _executor_metrics(metrics: PlasticityEpisodeMetrics | None) -> dict[str, obj
         "store_memory_update_strength": metrics.store_memory_update_strength,
         "delta_correction_magnitude": metrics.delta_correction_magnitude,
         "memory_read_strength": metrics.memory_read_strength,
+        "key_query_cosine_mean": metrics.key_query_cosine_mean,
+        "key_query_cosine_at_query": metrics.key_query_cosine_at_query,
     }
 
 
@@ -1155,6 +1159,8 @@ def _aggregate_episode_metrics(metrics: Sequence[PlasticityEpisodeMetrics]) -> P
         store_memory_update_strength=float(np.mean([metric.store_memory_update_strength for metric in metrics])),
         delta_correction_magnitude=float(np.mean([metric.delta_correction_magnitude for metric in metrics])),
         memory_read_strength=float(np.mean([metric.memory_read_strength for metric in metrics])),
+        key_query_cosine_mean=float(np.mean([metric.key_query_cosine_mean for metric in metrics])),
+        key_query_cosine_at_query=float(np.mean([metric.key_query_cosine_at_query for metric in metrics])),
     )
 
 

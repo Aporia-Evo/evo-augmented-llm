@@ -11,7 +11,7 @@ from evolve.genome_codec import GenomeModel
 from utils.serialization import stable_json_dumps
 
 
-FEATURE_VERSION = "candidate-features-v9"
+FEATURE_VERSION = "candidate-features-v10"
 BOUND_TOLERANCE = 1e-6
 
 
@@ -219,6 +219,8 @@ def extract_candidate_features(
         store_memory_update_strength=_coerce_float(metrics.get("store_memory_update_strength")),
         delta_correction_magnitude=_coerce_float(metrics.get("delta_correction_magnitude")),
         memory_read_strength=_coerce_float(metrics.get("memory_read_strength")),
+        key_query_cosine_mean=_coerce_float(metrics.get("key_query_cosine_mean")),
+        key_query_cosine_at_query=_coerce_float(metrics.get("key_query_cosine_at_query")),
     )
     vector = _feature_vector_from_record(feature)
     return feature, vector
@@ -350,6 +352,8 @@ def _feature_vector_from_record(record: CandidateFeatureRecord) -> CandidateFeat
         record.store_memory_update_strength,
         record.delta_correction_magnitude,
         record.memory_read_strength,
+        record.key_query_cosine_mean,
+        record.key_query_cosine_at_query,
     ]
     array = np.asarray(vector, dtype=np.float64)
     norm_l2 = float(np.linalg.norm(array))

@@ -317,6 +317,8 @@ class CandidateFeatureRecord:
     store_memory_update_strength: float = 0.0
     delta_correction_magnitude: float = 0.0
     memory_read_strength: float = 0.0
+    key_query_cosine_mean: float = 0.0
+    key_query_cosine_at_query: float = 0.0
 
 
 @dataclass(frozen=True)
