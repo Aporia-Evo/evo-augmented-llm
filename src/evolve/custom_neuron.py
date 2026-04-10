@@ -1243,18 +1243,30 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     read_t = decayed_state @ q_t
                     read_t = _clip_vector_norm(read_t, max_norm=read_clip_norm)
                     q_centered = q_t - float(np.mean(q_t))
-                    q_focus_logits = 4.0 * q_centered
+                    query_variance_signal = query_variance / (query_variance + 0.0025)
+                    q_focus_temperature = 4.0 + (1.6 * query_variance_signal)
+                    q_focus_logits = q_focus_temperature * q_centered
                     q_focus_logits = q_focus_logits - float(np.max(q_focus_logits))
                     q_focus = np.exp(q_focus_logits)
+                    q_focus = q_focus / (float(np.sum(q_focus)) + 1e-9)
+                    q_dominant = np.maximum(q_t - float(np.mean(q_t)), 0.0)
+                    q_dominant = q_dominant / (float(np.sum(q_dominant)) + 1e-9)
+                    focus_blend = 0.3 * query_variance_signal
+                    q_focus = ((1.0 - focus_blend) * q_focus) + (focus_blend * q_dominant)
                     q_focus = q_focus / (float(np.sum(q_focus)) + 1e-9)
                     read_mean = float(np.mean(read_t))
                     read_abs_mean = float(np.mean(np.abs(read_t)))
                     selective_readout = float(np.dot(read_t, q_focus))
                     read_contrast = float(np.max(read_t) - np.min(read_t))
+                    read_separation = read_contrast / (read_abs_mean + 1e-6)
+                    separation_gate = math.tanh(read_separation)
+                    diffuse_penalty = 1.0 - query_variance_signal
+                    selective_gain = 1.0 + (0.25 * separation_gate * (0.4 + (0.6 * query_variance_signal)))
                     readout = (
                         (0.25 * read_mean)
-                        + (0.55 * selective_readout)
+                        + (0.55 * selective_gain * selective_readout)
                         + (0.2 * math.tanh(read_contrast) * (2.0 * query_signal - 1.0))
+                        - (0.08 * diffuse_penalty * read_mean)
                     )
                     read_gain = max(
                         0.25,
