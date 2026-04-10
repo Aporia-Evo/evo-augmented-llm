@@ -584,12 +584,6 @@ class KeyValueMemoryEvaluator:
             "value_margin": value_margin,
             "distractor_competition_score": distractor_competition_score,
         }
-        score += _delta_retrieval_selection_pressure_bonus(
-            variant=self.variant,
-            task_metrics=task_metrics,
-            episode_metrics=episode_metrics,
-        )
-
         return TemporalSequenceEvaluation(
             score=score,
             sequence_mse=sequence_mse,
@@ -603,41 +597,6 @@ class KeyValueMemoryEvaluator:
             episode_metrics=episode_metrics,
             task_metrics=task_metrics,
         )
-
-
-def _delta_retrieval_selection_pressure_bonus(
-    *,
-    variant: str,
-    task_metrics: dict[str, float | bool | int],
-    episode_metrics: PlasticityEpisodeMetrics | None,
-) -> float:
-    if not is_stateful_v6_delta_memory_variant(variant) or episode_metrics is None:
-        return 0.0
-
-    correct_key_selected = float(task_metrics.get("correct_key_selected", 0.0))
-    query_key_match_score = float(task_metrics.get("query_key_match_score", 0.0))
-    store_vs_distractor_beta_gap = float(episode_metrics.store_vs_distractor_beta_gap)
-    key_query_cosine_mean = float(episode_metrics.key_query_cosine_mean)
-    key_query_cosine_at_query = float(episode_metrics.key_query_cosine_at_query)
-    key_variance_mean = float(episode_metrics.key_variance_mean)
-    query_variance_mean = float(episode_metrics.query_variance_mean)
-
-    query_key_signal = 0.5 * (np.clip(query_key_match_score, -1.0, 1.0) + 1.0)
-    beta_gap_signal = 0.5 * (np.clip(store_vs_distractor_beta_gap, -1.0, 1.0) + 1.0)
-
-    reward = (
-        0.40 * correct_key_selected
-        + 0.35 * query_key_signal
-        + 0.25 * beta_gap_signal
-    )
-    penalty = (
-        0.20 * max(0.0, key_query_cosine_mean - 0.90)
-        + 0.25 * max(0.0, key_query_cosine_at_query - 0.90)
-        + 1.50 * max(0.0, 0.02 - key_variance_mean)
-        + 1.50 * max(0.0, 0.02 - query_variance_mean)
-    )
-    selection_pressure_score = reward - penalty
-    return 0.5 * selection_pressure_score
 
 
 class EventMemoryEvaluator:
