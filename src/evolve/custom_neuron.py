@@ -1546,6 +1546,24 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     )
                     q_focus = q_focus + (q_focus_margin_gain * q_focus_profile)
                     q_focus = q_focus / (float(np.sum(q_focus)) + 1e-9)
+                    if step_role == "query":
+                        read_contrast_signal = float(np.max(read_t) - np.min(read_t))
+                        query_focus_sharpen_logit = (
+                            (0.55 * query_signal)
+                            + (0.35 * max(0.0, key_query_cos))
+                            + (0.3 * math.tanh(read_contrast_signal))
+                            - (0.2 * store_signal)
+                            - 0.45
+                        )
+                        query_focus_sharpen_strength = 0.06 * (
+                            0.5 + (0.5 * math.tanh(query_focus_sharpen_logit))
+                        )
+                        q_focus_centered = q_focus - float(np.mean(q_focus))
+                        q_focus = q_focus * (
+                            1.0
+                            + (query_focus_sharpen_strength * np.tanh(q_focus_centered / 0.05))
+                        )
+                        q_focus = _positive_sum_normalize(np.maximum(q_focus, 1e-6))
                     read_mean = float(np.mean(read_t))
                     read_abs_mean = float(np.mean(np.abs(read_t)))
                     selective_readout = float(np.dot(read_t, q_focus))
