@@ -1180,24 +1180,38 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     k_raw = np.maximum(k_raw, 1e-3)
                     q_raw = np.maximum(q_raw, 1e-3)
                     k_t_base = _positive_sum_normalize(k_raw)
+                    q_t_base = _positive_sum_normalize(q_raw)
                     key_variance_pre = float(np.var(k_t_base))
+                    query_variance_pre = float(np.var(q_t_base))
                     key_query_asym = abs(key_seed) / (abs(key_seed) + abs(query_seed) + 1e-6)
                     key_sharpen_logit = (
-                        (0.8 * store_signal)
+                        (0.9 * store_signal)
                         + (0.55 * key_query_asym)
                         + (0.35 * (key_variance_pre / (key_variance_pre + 0.0025)))
-                        - 0.75
+                        - (0.35 * query_signal)
+                        - 0.7
                     )
-                    key_sharpen_gain = 0.12 * (1.0 + math.tanh(key_sharpen_logit))
+                    key_sharpen_gain = 0.1 * (1.0 + math.tanh(key_sharpen_logit))
                     k_centered_pre = k_t_base - float(np.mean(k_t_base))
                     k_std_pre = math.sqrt(key_variance_pre + 1e-9)
+                    q_centered_pre = q_t_base - float(np.mean(q_t_base))
+                    q_std_pre = math.sqrt(query_variance_pre + 1e-9)
                     k_peaking = np.tanh(k_centered_pre / (k_std_pre + 1e-6))
+                    query_compat_profile = np.tanh(q_centered_pre / (q_std_pre + 1e-6))
+                    congruence_logit = (
+                        (0.8 * store_signal)
+                        + (0.4 * key_query_asym)
+                        + (0.25 * (query_variance_pre / (query_variance_pre + 0.0025)))
+                        - (0.55 * query_signal)
+                        - 0.55
+                    )
+                    congruence_gain = 0.045 * (1.0 + math.tanh(congruence_logit))
                     k_sharpened = (
                         k_t_base * (1.0 + (key_sharpen_gain * k_peaking))
+                        + (congruence_gain * query_compat_profile)
                         + (0.03 * key_sharpen_gain * center_peak)
                     )
                     k_t = _positive_sum_normalize(np.maximum(k_sharpened, 1e-6))
-                    q_t_base = _positive_sum_normalize(q_raw)
                     k_centered = k_t - float(np.mean(k_t))
                     q_centered = q_t_base - float(np.mean(q_t_base))
                     key_center_norm = float(np.linalg.norm(k_centered))
@@ -1205,10 +1219,30 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     raw_projection_coeff = float(np.dot(q_centered, k_centered)) / key_center_energy
                     bounded_projection_coeff = 0.4 * math.tanh(raw_projection_coeff / 0.4)
                     projection_magnitude = abs(float(np.dot(q_centered, k_centered))) / (key_center_norm + 1e-9)
-                    query_variance_pre = float(np.var(q_t_base))
                     key_query_cos_base = float(
                         np.dot(q_t_base, k_t) / (np.linalg.norm(q_t_base) * np.linalg.norm(k_t) + 1e-9)
                     )
+                    compat_refine_logit = (
+                        (0.85 * store_signal)
+                        + (0.35 * key_query_asym)
+                        + (0.35 * max(0.0, key_query_cos_base))
+                        + (0.35 * (projection_magnitude / (projection_magnitude + 0.1)))
+                        - (0.45 * query_signal)
+                        - 0.65
+                    )
+                    compat_refine_gain = 0.03 * (1.0 + math.tanh(compat_refine_logit))
+                    k_t = _positive_sum_normalize(
+                        np.maximum(
+                            k_t + (compat_refine_gain * query_compat_profile),
+                            1e-6,
+                        )
+                    )
+                    k_centered = k_t - float(np.mean(k_t))
+                    key_center_norm = float(np.linalg.norm(k_centered))
+                    key_center_energy = float(np.dot(k_centered, k_centered)) + 1e-9
+                    raw_projection_coeff = float(np.dot(q_centered, k_centered)) / key_center_energy
+                    bounded_projection_coeff = 0.4 * math.tanh(raw_projection_coeff / 0.4)
+                    projection_magnitude = abs(float(np.dot(q_centered, k_centered))) / (key_center_norm + 1e-9)
                     projection_signal = abs(bounded_projection_coeff) / (abs(bounded_projection_coeff) + 0.15)
                     query_collapse_signal_pre = 0.003 / (query_variance_pre + 0.003)
                     deflation_logit = (
@@ -1274,7 +1308,25 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     beta_t = min(0.95, max(0.03, beta_t))
                     delta_t = _clip_vector_norm(delta_t, max_norm=delta_clip_norm)
                     update_scale = 0.85 + (0.35 * write_eligibility)
-                    update = (beta_t * update_scale) * np.outer(delta_t, k_t)
+                    update_focus_logit = (
+                        (0.9 * store_signal)
+                        + (0.45 * write_eligibility)
+                        + (0.35 * key_variance_signal)
+                        + (0.35 * max(0.0, key_query_cos_base))
+                        - (0.35 * query_signal)
+                        - 0.85
+                    )
+                    update_focus_gain = 0.08 * (1.0 + math.tanh(update_focus_logit))
+                    k_update_centered = k_t - float(np.mean(k_t))
+                    k_update_std = math.sqrt(key_variance + 1e-9)
+                    k_update_peaking = np.tanh(k_update_centered / (k_update_std + 1e-6))
+                    k_update = _positive_sum_normalize(
+                        np.maximum(
+                            k_t * (1.0 + (update_focus_gain * k_update_peaking)),
+                            1e-6,
+                        )
+                    )
+                    update = (beta_t * update_scale) * np.outer(delta_t, k_update)
                     update_norm = float(np.linalg.norm(update, ord="fro"))
                     if update_norm > update_clip_frob:
                         update = update * (update_clip_frob / (update_norm + 1e-9))
