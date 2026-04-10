@@ -1179,7 +1179,24 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     )
                     k_raw = np.maximum(k_raw, 1e-3)
                     q_raw = np.maximum(q_raw, 1e-3)
-                    k_t = _positive_sum_normalize(k_raw)
+                    k_t_base = _positive_sum_normalize(k_raw)
+                    key_variance_pre = float(np.var(k_t_base))
+                    key_query_asym = abs(key_seed) / (abs(key_seed) + abs(query_seed) + 1e-6)
+                    key_sharpen_logit = (
+                        (0.8 * store_signal)
+                        + (0.55 * key_query_asym)
+                        + (0.35 * (key_variance_pre / (key_variance_pre + 0.0025)))
+                        - 0.75
+                    )
+                    key_sharpen_gain = 0.12 * (1.0 + math.tanh(key_sharpen_logit))
+                    k_centered_pre = k_t_base - float(np.mean(k_t_base))
+                    k_std_pre = math.sqrt(key_variance_pre + 1e-9)
+                    k_peaking = np.tanh(k_centered_pre / (k_std_pre + 1e-6))
+                    k_sharpened = (
+                        k_t_base * (1.0 + (key_sharpen_gain * k_peaking))
+                        + (0.03 * key_sharpen_gain * center_peak)
+                    )
+                    k_t = _positive_sum_normalize(np.maximum(k_sharpened, 1e-6))
                     q_t_base = _positive_sum_normalize(q_raw)
                     k_centered = k_t - float(np.mean(k_t))
                     q_centered = q_t_base - float(np.mean(q_t_base))
@@ -1188,8 +1205,28 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     raw_projection_coeff = float(np.dot(q_centered, k_centered)) / key_center_energy
                     bounded_projection_coeff = 0.4 * math.tanh(raw_projection_coeff / 0.4)
                     projection_magnitude = abs(float(np.dot(q_centered, k_centered))) / (key_center_norm + 1e-9)
-                    deflation_vector = 0.35 * bounded_projection_coeff * k_centered
-                    q_decoupled = q_t_base - deflation_vector
+                    query_variance_pre = float(np.var(q_t_base))
+                    key_query_cos_base = float(
+                        np.dot(q_t_base, k_t) / (np.linalg.norm(q_t_base) * np.linalg.norm(k_t) + 1e-9)
+                    )
+                    projection_signal = abs(bounded_projection_coeff) / (abs(bounded_projection_coeff) + 0.15)
+                    query_collapse_signal_pre = 0.003 / (query_variance_pre + 0.003)
+                    deflation_logit = (
+                        (1.2 * max(0.0, key_query_cos_base))
+                        + (0.95 * projection_signal)
+                        + (0.7 * query_collapse_signal_pre)
+                        - 0.85
+                    )
+                    deflation_gain = 1.0 + (0.45 * (1.0 + math.tanh(deflation_logit)))
+                    deflation_vector = 0.35 * deflation_gain * bounded_projection_coeff * k_centered
+                    q_orthogonal_hint = q_centered - (raw_projection_coeff * k_centered)
+                    q_orthogonal_norm = float(np.linalg.norm(q_orthogonal_hint))
+                    q_orthogonal_term = 0.03 * deflation_gain * (
+                        q_orthogonal_hint / (q_orthogonal_norm + 1e-9)
+                    )
+                    edge_recentered = edge_peak - float(np.mean(edge_peak))
+                    edge_gain = 0.02 * deflation_gain * query_collapse_signal_pre * query_signal
+                    q_decoupled = q_t_base - deflation_vector + q_orthogonal_term + (edge_gain * edge_recentered)
                     q_t = _positive_sum_normalize(np.maximum(q_decoupled, 1e-6))
                     v_t = np.asarray(
                         [
@@ -1208,7 +1245,6 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     value_norm = float(np.linalg.norm(v_t))
                     novelty_ratio = raw_delta_norm / (value_norm + 1e-6)
                     novelty_signal = novelty_ratio / (1.0 + novelty_ratio)
-                    key_query_asym = abs(key_seed) / (abs(key_seed) + abs(query_seed) + 1e-6)
                     key_variance = float(np.var(k_t))
                     query_variance = float(np.var(q_t))
                     key_query_cos = float(np.dot(q_t, k_t) / (np.linalg.norm(q_t) * np.linalg.norm(k_t) + 1e-9))
