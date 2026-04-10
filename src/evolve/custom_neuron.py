@@ -1341,6 +1341,23 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     extra_deflation_vector = query_deflation_gain * bounded_post_projection * k_centered
                     q_t = _positive_sum_normalize(np.maximum(q_t - extra_deflation_vector, 1e-6))
                     key_variance = float(np.var(k_t))
+                    if step_role == "store":
+                        key_variance_signal_pre = key_variance / (key_variance + 0.003)
+                        store_key_sharpen_logit = (
+                            (0.9 * store_signal)
+                            + (0.55 * key_query_asym)
+                            + (0.45 * key_variance_signal_pre)
+                            + (0.35 * (projection_magnitude_pre / (projection_magnitude_pre + 0.1)))
+                            - (0.35 * query_signal)
+                            - 0.8
+                        )
+                        store_key_sharpen_strength = 0.05 * (1.0 + math.tanh(store_key_sharpen_logit))
+                        sharpen_exponent = 1.0 + store_key_sharpen_strength
+                        k_t = _positive_sum_normalize(np.power(np.maximum(k_t, 1e-6), sharpen_exponent))
+                        k_centered = k_t - float(np.mean(k_t))
+                        key_center_norm = float(np.linalg.norm(k_centered))
+                        key_center_energy = float(np.dot(k_centered, k_centered)) + 1e-9
+                    key_variance = float(np.var(k_t))
                     query_variance = float(np.var(q_t))
                     query_variance_signal = query_variance / (query_variance + 0.0025)
                     projection_write_signal = projection_magnitude / (projection_magnitude + 0.08)
