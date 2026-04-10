@@ -1099,6 +1099,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         memory_norm_vals: list[float] = []
         query_alignment_vals: list[float] = []
         store_update_vals: list[float] = []
+        distractor_update_vals: list[float] = []
+        query_update_vals: list[float] = []
         delta_correction_vals: list[float] = []
         memory_read_vals: list[float] = []
         readout_selectivity_vals: list[float] = []
@@ -1399,6 +1401,37 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     beta_t = min(0.95, max(0.03, beta_t))
                     delta_t = _clip_vector_norm(delta_t, max_norm=delta_clip_norm)
                     update_scale = 0.85 + (0.35 * write_eligibility)
+                    write_impact_logit = (
+                        (1.05 * store_signal)
+                        + (0.55 * write_eligibility)
+                        + (0.45 * novelty_signal)
+                        + (0.32 * key_variance_signal)
+                        + (0.3 * (1.0 - min(1.0, max(0.0, key_query_cos))))
+                        - (0.75 * query_signal)
+                        - (0.42 * projection_write_signal)
+                        - (0.3 * query_collapse_signal)
+                        - 0.95
+                    )
+                    write_impact_gate = 0.8 + (
+                        0.45
+                        * (0.5 + (0.5 * math.tanh(write_impact_logit)))
+                    )
+                    delta_selectivity_logit = (
+                        (0.95 * novelty_signal)
+                        + (0.52 * store_signal)
+                        + (0.4 * write_eligibility)
+                        + (0.32 * key_variance_signal)
+                        + (0.25 * (1.0 - min(1.0, max(0.0, key_query_cos))))
+                        - (0.6 * query_signal)
+                        - (0.4 * projection_write_signal)
+                        - (0.35 * query_collapse_signal)
+                        - 0.85
+                    )
+                    delta_selectivity = 0.85 + (
+                        0.35
+                        * (0.5 + (0.5 * math.tanh(delta_selectivity_logit)))
+                    )
+                    delta_t = delta_selectivity * delta_t
                     update_focus_logit = (
                         (0.9 * store_signal)
                         + (0.45 * write_eligibility)
@@ -1428,7 +1461,24 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             1e-6,
                         )
                     )
-                    update = (beta_t * update_scale) * np.outer(delta_t, k_update)
+                    update_address_logit = (
+                        (0.95 * store_signal)
+                        + (0.45 * write_eligibility)
+                        + (0.35 * key_variance_signal)
+                        + (0.3 * projection_write_signal)
+                        - (0.55 * query_signal)
+                        - 0.8
+                    )
+                    update_address_gain = 0.018 * (1.0 + math.tanh(update_address_logit))
+                    k_update_centered_post = k_update - float(np.mean(k_update))
+                    k_update = _positive_sum_normalize(
+                        np.maximum(
+                            k_update + (update_address_gain * np.maximum(k_update_centered_post, 0.0)),
+                            1e-6,
+                        )
+                    )
+                    effective_write_scale = beta_t * update_scale * write_impact_gate
+                    update = effective_write_scale * np.outer(delta_t, k_update)
                     update_norm = float(np.linalg.norm(update, ord="fro"))
                     if update_norm > update_clip_frob:
                         update = update * (update_clip_frob / (update_norm + 1e-9))
@@ -1544,14 +1594,18 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         store_update_vals.append(float(np.linalg.norm(update, ord="fro")))
                     elif step_role == "distractor":
                         beta_distractor_vals.append(beta_t)
+                        distractor_update_vals.append(float(np.linalg.norm(update, ord="fro")))
                     elif step_role == "query":
                         beta_query_vals.append(beta_t)
+                        query_update_vals.append(float(np.linalg.norm(update, ord="fro")))
                         query_alignment_vals.append(key_query_cos)
                         key_query_cosine_query_vals.append(key_query_cos)
                 outputs = next_outputs
             sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
         mean_store_beta = float(np.mean(beta_store_vals)) if beta_store_vals else 0.0
         mean_distractor_beta = float(np.mean(beta_distractor_vals)) if beta_distractor_vals else 0.0
+        mean_store_update = float(np.mean(store_update_vals)) if store_update_vals else 0.0
+        mean_distractor_update = float(np.mean(distractor_update_vals)) if distractor_update_vals else 0.0
         self._last_metrics = PlasticityEpisodeMetrics(
             plasticity_enabled=False,
             mean_abs_delta_w=0.0,
@@ -1567,12 +1621,16 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
             beta_at_distractor=mean_distractor_beta,
             beta_at_query=float(np.mean(beta_query_vals)) if beta_query_vals else 0.0,
             store_vs_distractor_beta_gap=mean_store_beta - mean_distractor_beta,
+            write_gate_at_store=mean_store_update,
+            write_gate_at_distractor=mean_distractor_update,
+            write_gate_at_query=float(np.mean(query_update_vals)) if query_update_vals else 0.0,
+            store_vs_distractor_write_gap=mean_store_update - mean_distractor_update,
             mean_key_norm=float(np.mean(key_norm_vals)) if key_norm_vals else 0.0,
             mean_query_norm=float(np.mean(query_norm_vals)) if query_norm_vals else 0.0,
             mean_value_norm=float(np.mean(value_norm_vals)) if value_norm_vals else 0.0,
             mean_memory_frobenius_norm=float(np.mean(memory_norm_vals)) if memory_norm_vals else 0.0,
             query_memory_alignment=float(np.mean(query_alignment_vals)) if query_alignment_vals else 0.0,
-            store_memory_update_strength=float(np.mean(store_update_vals)) if store_update_vals else 0.0,
+            store_memory_update_strength=mean_store_update,
             delta_correction_magnitude=float(np.mean(delta_correction_vals)) if delta_correction_vals else 0.0,
             memory_read_strength=float(np.mean(memory_read_vals)) if memory_read_vals else 0.0,
             key_query_cosine_mean=float(np.mean(key_query_cosine_vals)) if key_query_cosine_vals else 0.0,
