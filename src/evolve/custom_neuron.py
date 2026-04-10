@@ -1517,25 +1517,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     read_abs_mean = float(np.mean(np.abs(read_t)))
                     projection_read_signal = projection_magnitude / (projection_magnitude + 0.12)
                     read_centered = read_t - read_mean
-                    read_positive = np.maximum(read_centered, 0.0)
-                    read_positive = read_positive / (float(np.sum(read_positive)) + 1e-9)
-                    value_focus_logit = (
-                        (1.0 * query_signal)
-                        + (0.7 * query_focus_quality)
-                        + (0.45 * projection_read_signal)
-                        + (0.4 * max(0.0, key_query_cos))
-                        + (0.25 * query_variance_signal)
-                        - (0.45 * query_collapse_signal)
-                        - 1.1
-                    )
-                    value_focus_gain = 0.08 * (1.0 + math.tanh(value_focus_logit))
-                    value_focus = _positive_sum_normalize(
-                        np.maximum(
-                            q_focus + (value_focus_gain * (read_positive - q_focus)),
-                            1e-6,
-                        )
-                    )
-                    selective_readout = float(np.dot(read_t, value_focus))
+                    selective_readout = float(np.dot(read_t, q_focus))
                     read_contrast = float(np.max(read_t) - np.min(read_t))
                     read_separation = read_contrast / (read_abs_mean + 1e-6)
                     separation_gate = math.tanh(read_separation)
@@ -1552,7 +1534,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     value_contrast_gain = 0.5 + (0.5 * math.tanh(value_contrast_logit))
                     read_center_norm = float(np.linalg.norm(read_centered))
                     contrast_direction = read_centered / (read_center_norm + 1e-9)
-                    contrast_readout = float(np.dot(contrast_direction, value_focus))
+                    contrast_readout = float(np.dot(contrast_direction, q_focus))
                     value_contrast_logit_2 = (
                         (0.85 * query_signal)
                         + (0.6 * query_focus_quality)
@@ -1563,7 +1545,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         - 1.0
                     )
                     value_contrast_gate = 0.5 + (0.5 * math.tanh(value_contrast_logit_2))
-                    value_contrast_readout = float(np.dot(read_centered, value_focus))
+                    value_contrast_readout = float(np.dot(read_centered, q_focus))
                     selective_gain = 1.0 + (
                         0.45
                         * separation_gate
