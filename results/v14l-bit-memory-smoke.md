@@ -5,4 +5,4 @@
 
 | task | delay | variant | runs | success_rate | mean_final_max_score | mean_first_success_generation | median_first_success_generation | mean_best_nodes | mean_best_enabled_conns |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| bit_memory | 1 | stateful_v6_delta_memory | 1 | 0.000 | 2.934826 | n/a | n/a | 5.00 | 4.00 |
+| bit_memory | 1 | stateful_v6_delta_memory | 1 | 0.000 | 2.895301 | n/a | n/a | 4.00 | 3.00 |
