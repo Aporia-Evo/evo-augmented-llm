@@ -1324,6 +1324,22 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         + (focus_gain * q_focus_profile)
                     )
                     q_t = _positive_sum_normalize(np.maximum(q_decoupled, 1e-6))
+                    q_post_centered = q_t - float(np.mean(q_t))
+                    post_projection_coeff = float(np.dot(q_post_centered, k_centered)) / key_center_energy
+                    bounded_post_projection = 0.25 * math.tanh(post_projection_coeff / 0.25)
+                    query_deflation_gain = 0.06 * (
+                        0.5
+                        + 0.5
+                        * math.tanh(
+                            (0.8 * projection_selectivity_signal)
+                            + (0.45 * max(0.0, key_query_cos_base))
+                            + (0.35 * query_collapse_signal_pre)
+                            - (0.5 * query_signal)
+                            - 0.7
+                        )
+                    )
+                    extra_deflation_vector = query_deflation_gain * bounded_post_projection * k_centered
+                    q_t = _positive_sum_normalize(np.maximum(q_t - extra_deflation_vector, 1e-6))
                     key_variance = float(np.var(k_t))
                     query_variance = float(np.var(q_t))
                     query_variance_signal = query_variance / (query_variance + 0.0025)
@@ -1591,7 +1607,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     key_variance_vals.append(key_variance)
                     query_variance_vals.append(query_variance)
                     key_query_projection_vals.append(projection_magnitude)
-                    query_decoupling_vals.append(float(np.linalg.norm(deflation_vector)))
+                    query_decoupling_vals.append(float(np.linalg.norm(deflation_vector) + np.linalg.norm(extra_deflation_vector)))
                     key_query_cosine_vals.append(key_query_cos)
                     value_norm_vals.append(float(np.linalg.norm(v_t)))
                     memory_norm_vals.append(float(np.linalg.norm(new_state, ord="fro")))
