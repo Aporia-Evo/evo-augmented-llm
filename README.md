@@ -1,392 +1,392 @@
-# Evo-Augmented LLM / Memory-Mechanics Projekt
+# Evo-Augmented LLM / Memory Mechanics Project
 
-## Zielsetzung
+## Objective
 
-Dieses Projekt untersucht, wie sich **selektives Memory-Retrieval** in kleinen, neuroevolutionär optimierten Netzwerken realisieren lässt, **ohne** direkt auf volle Transformer-Attention oder große, gradientengetriebene Speicherarchitekturen zurückzugreifen.
+This project investigates how **selective memory retrieval** can be implemented in small, neuroevolution-optimized networks **without** relying on full transformer attention or large gradient-driven memory architectures.
 
-Das Kernziel ist ein Mechanismus, der:
+The core goal is a mechanism that can:
 
-- **Information gezielt speichern** kann,
-- **Distraktoren robust ignoriert**,
-- **später den richtigen Value zum richtigen Key** wieder abruft,
-- in einem **kleinen, statisch geformten JAX/NEAT-Setup** trainierbar bleibt,
-- und **ohne expliziten Softmax-Addressing-Kollaps** auskommt.
+- **store information selectively**,
+- **robustly ignore distractors**,
+- **retrieve the correct value for the correct key later**,
+- remain trainable in a **small, statically shaped JAX/NEAT setup**,
+- and do so **without explicit softmax-addressing collapse**.
 
-Praktisch ist das Projekt eine schrittweise Suche nach der kleinsten evolvierbaren Architektur, die zwischen einfacher Rekurrenz und echter content-basierter Retrieval-Mechanik liegt.
-
----
-
-## Leitfrage des Projekts
-
-> Wie kommt man von einfachem rekurrentem Zustandsspeicher zu belastbarem Key-Value-Retrieval unter Distraktoren, ohne den Suchraum für Neuroevolution unbeherrschbar zu machen?
-
-Daraus ergeben sich drei Daueranforderungen:
-
-1. **mechanistische Interpretierbarkeit** statt Black-Box-Komplexität,
-2. **minimal-invasive Architekturentwicklung** statt kompletter Redesigns,
-3. **benchmark-getriebene Entscheidung** statt rein theoretischer Präferenz.
+In practice, the project is a step-by-step search for the smallest evolvable architecture that lies between simple recurrence and genuine content-based retrieval mechanics.
 
 ---
 
-## Projektumgebung und Restriktionen
+## Guiding Project Question
 
-Das Projekt arbeitet unter für Memory-Mechaniken absichtlich harten Randbedingungen:
+> How do we move from simple recurrent state memory to reliable key-value retrieval under distractors, without making the neuroevolution search space unmanageable?
 
-- kleine Populationen,
-- neuroevolutionäre Optimierung statt Voll-Backpropagation,
-- statische JAX-Shapes,
-- reproduzierbare Benchmarks,
-- geringer Architektur-Overhead,
-- starke Sensitivität gegenüber Symmetrie, Default-Lösungen und lokalen Optima.
+This leads to three persistent requirements:
 
-Diese Restriktionen sind nicht Nebenbedingungen, sondern Teil der Forschungsfrage: Gesucht wird **kein maximal mächtiges Modell**, sondern ein **unter Evolutionssuche stabil lernbarer Retrieval-Mechanismus**.
+1. **mechanistic interpretability** instead of black-box complexity,
+2. **minimally invasive architectural development** instead of full redesigns,
+3. **benchmark-driven decisions** instead of purely theoretical preferences.
 
 ---
 
-## Benchmark-Familien
+## Project Environment and Constraints
 
-Die Entwicklung wurde entlang mehrerer synthetischer Memory-Aufgaben validiert.
+The project operates under deliberately strict conditions for memory mechanisms:
+
+- small populations,
+- neuroevolutionary optimization instead of full backpropagation,
+- static JAX shapes,
+- reproducible benchmarks,
+- low architecture overhead,
+- high sensitivity to symmetry, default solutions, and local optima.
+
+These constraints are not side conditions—they are part of the research question. The aim is **not a maximally powerful model**, but a **retrieval mechanism that learns stably under evolutionary search**.
+
+---
+
+## Benchmark Families
+
+Development has been validated across several synthetic memory tasks.
 
 ### 1. `bit_memory`
-Einfachster Nachweis, dass eine Architektur überhaupt zeitverzögert Information halten kann.
+The simplest proof that an architecture can retain information over time delays.
 
-**Zweck:**
-- Basis-Check für rekurrente Zustandserhaltung
-- Delay-Robustheit
-- Debugging von Memory- und Evaluationspfaden
+**Purpose:**
+- baseline check for recurrent state retention
+- delay robustness
+- debugging memory and evaluation paths
 
 ### 2. `key_value_memory_trivial`
-Ein erster Übergang von reinem Delay-Memory zu expliziterem Zuordnungslernen.
+A first transition from pure delay memory to more explicit assignment learning.
 
-**Zweck:**
-- einfache Key-Value-Zuordnung
-- erste Trennung von Store und Query
-- Test, ob Architektur mehr als nur eine fortlaufende Zustandstrajektorie ausnutzt
+**Purpose:**
+- simple key-value assignment
+- initial separation of store and query
+- test whether the architecture does more than exploit a continuous state trajectory
 
 ### 3. `key_value_memory_easy` / `kv_easy`
-Der zentrale Engpass-Benchmark des Projekts.
+The central bottleneck benchmark of the project.
 
-**Zweck:**
-- mehrere Stores
-- Distraktoren
-- spätere Query
-- exakter Abruf des richtigen Values
+**Purpose:**
+- multiple stores
+- distractors
+- delayed query
+- exact retrieval of the correct value
 
-Diese Task ist die entscheidende Schwelle: Viele Mechaniken können Information grob halten, scheitern aber hier an **Key-Selektion, Distraktor-Unterdrückung oder stabilem Value-Readout**.
-
----
-
-## Wie Fortschritt gemessen wird
-
-Nicht nur der Gesamtscore ist relevant, sondern vor allem die mechanistischen Diagnosemetriken.
-
-Wichtige Metriken im Projektverlauf:
-
-- `query_key_match_score` – koppelt die Query überhaupt an den relevanten Key?
-- `correct_key_selected` – wird der richtige Speicherinhalt adressiert?
-- `correct_value_selected` – kommt tatsächlich der richtige Value heraus?
-- `store_vs_distractor_beta_gap` – trennt der Schreibpfad relevante Stores von Distraktoren?
-- `key_query_cosine_mean` / `key_query_cosine_at_query` – wie ähnlich sind Key- und Query-Räume?
-- `key_variance_mean` / `query_variance_mean` – kollabieren Key/Query in zu geringe Varianz?
-- `mean_memory_frobenius_norm` – bleibt der Speicher numerisch im stabilen Bereich?
-- `query_memory_alignment` – ist überhaupt ein funktionaler content-basierter Read-Pfad vorhanden?
-
-Diese Metriken sind zentral, weil viele Fehlschläge nicht in totalem Kollaps enden, sondern in **scheinbar aktiven, aber funktional entkoppelten Mechaniken**.
+This task is the critical threshold: many mechanisms can roughly preserve information, but fail here due to **key selection, distractor suppression, or stable value readout**.
 
 ---
 
-## Projektstationen bis jetzt
+## How Progress Is Measured
 
-Die folgende Einordnung fasst die sichtbaren Projektstufen aus Code, Result-Dateien und bisherigen Experimenten zusammen. Sie ist auf die mechanistische Entwicklungslinie fokussiert.
+Not only the total score matters, but especially the mechanistic diagnostic metrics.
 
-### Phase A – frühe rekurrente Baselines (`v4.x` bis `v6`)
+Important metrics throughout the project:
 
-**Charakter:**
-- einfache stateful Baselines
-- rekurrente Speicherideen
-- erste plastische oder zustandsbehaftete Varianten
+- `query_key_match_score` – does the query couple to the relevant key at all?
+- `correct_key_selected` – is the correct memory content addressed?
+- `correct_value_selected` – is the correct value actually produced?
+- `store_vs_distractor_beta_gap` – does the write path separate relevant stores from distractors?
+- `key_query_cosine_mean` / `key_query_cosine_at_query` – how similar are key and query spaces?
+- `key_variance_mean` / `query_variance_mean` – do key/query representations collapse to low variance?
+- `mean_memory_frobenius_norm` – does memory remain numerically stable?
+- `query_memory_alignment` – is there a functional content-based read path at all?
 
-**Ziel dieser Phase:**
-- überhaupt verlässliche Zeitabhängigkeit herstellen
-- Infrastruktur für Evaluation, Delay-Benchmarks und Reproduzierbarkeit festigen
-
-**Ergebnis:**
-- geeignet als Baseline für Delay-Memory
-- nicht ausreichend für robustes Key-Value-Retrieval unter Distraktoren
-
-**Wichtig:**
-Diese Phase etablierte den Maßstab: Reine Rekurrenz reicht für kleine Memory-Tasks, aber nicht für selektives Retrieval.
+These metrics are central because many failures do not end in total collapse, but in **apparently active yet functionally decoupled mechanisms**.
 
 ---
 
-### Phase B – Plastizität, Clamp- und Search-Space-Tuning (`v5a`, `v5b*`)
+## Project Stages So Far
 
-**Charakter:**
-- Hebb-/AD-Plasticity-Experimente
-- Clamp-Studien
-- Eta- und Decay-Suchräume
-- engere Suchraummodulation
+The following classification summarizes visible project stages based on code, result files, and experiments so far. It focuses on the mechanistic development trajectory.
 
-**Ziel dieser Phase:**
-- prüfen, ob lokale synaptische Anpassung Memory und Retrieval verbessern kann
-- verstehen, wann Plastizität aktiv hilft und wann sie nur Instabilität oder Untersteuerung erzeugt
+### Phase A – early recurrent baselines (`v4.x` to `v6`)
 
-**Ergebnis:**
-- wichtige Diagnosegewinne für Suchraumverhalten
-- Plastizität häufig zu schwach, zu vorsichtig oder schlecht differenziert
-- kein belastbarer Durchbruch für präzises Key-Value-Retrieval
+**Characteristics:**
+- simple stateful baselines
+- recurrent memory ideas
+- first plastic or stateful variants
 
-**Lerneffekt:**
-Plastizität alleine ersetzt keinen sauberen Retrieval-Mechanismus.
+**Goal of this phase:**
+- establish reliable temporal dependence at all
+- strengthen infrastructure for evaluation, delay benchmarks, and reproducibility
 
----
+**Outcome:**
+- suitable as a baseline for delay memory
+- not sufficient for robust key-value retrieval under distractors
 
-### Phase C – QD-Light, Archive- und Diversitätsarbeit (`v7`, `v7b`)
-
-**Charakter:**
-- QD-Light / Archive-Experimente
-- stärkere Suchraumabdeckung
-- Mechanismusdiversität statt nur Scoremaximierung
-
-**Ziel dieser Phase:**
-- nicht nur einen lokalen Elitepfad finden, sondern Suchraumregionen systematisch kartieren
-- robuste Descriptoren für spätere Analysen etablieren
-
-**Ergebnis:**
-- bessere Sicht auf funktionale vs. degenerierte Lösungen
-- hilfreich für Search-Space-Diagnostik
-- aber noch kein echter Retrieval-Durchbruch
-
-**Lerneffekt:**
-Diversität im Suchraum hilft bei Analyse und Exploration, löst aber das mechanistische Kernproblem nicht selbst.
+**Key takeaway:**
+This phase established the benchmark: pure recurrence is enough for small memory tasks, but not for selective retrieval.
 
 ---
 
-### Phase D – Curriculum- und Delay-Studien (`v8a`, `v8b`, `v8c`, `v8d`, `v9a`, `v9b`)
+### Phase B – plasticity, clamp, and search-space tuning (`v5a`, `v5b*`)
 
-**Charakter:**
-- Multi-Delay-Experimente
-- Curriculum-Phasen
-- Boundary-Studien
-- KV-Easy-Smoke und Mid/Full-Smokes
+**Characteristics:**
+- Hebbian / AD plasticity experiments
+- clamp studies
+- eta and decay search spaces
+- tighter search-space modulation
 
-**Ziel dieser Phase:**
-- prüfen, ob schrittweise Aufgabenhärtung die Mechanik stabilisiert
-- Delay-Generalisierung und Belastbarkeit testen
+**Goal of this phase:**
+- test whether local synaptic adaptation can improve memory and retrieval
+- understand when plasticity helps and when it only adds instability or under-control
 
-**Ergebnis:**
-- Curricula helfen teilweise beim Trainingseinstieg
-- die zentrale Retrieval-Barriere bleibt trotzdem bestehen
-- besonders `key_value_memory_easy` exponiert die strukturellen Defizite sehr klar
+**Outcome:**
+- important diagnostic gains for search-space behavior
+- plasticity often too weak, too cautious, or poorly differentiated
+- no reliable breakthrough for precise key-value retrieval
 
-**Lerneffekt:**
-Curriculum kann Optimierung glätten, aber nicht die falsche Mechanik kompensieren.
-
----
-
-### Phase E – KV-Diagnostik und Mechanismenzerlegung (`v11b`, `v11c`, implizit `v12`)
-
-**Charakter:**
-- stärkere Zerlegung in Write-/Read-/Match-Diagnostik
-- explizitere Retrievalmetriken
-- Fokus auf Key-/Value-Separation und Query-Match
-- funktional starke Slot-Linie (`v12c_slots_readoutplus`) als Referenz
-
-**Ziel dieser Phase:**
-- herausfinden, **wo** genau frühere Varianten scheitern:
-  - Write-Gate zu diffus?
-  - Query-Match zu schwach?
-  - Value-Readout instabil?
-  - Store/Query-Kopplung verloren?
-
-**Ergebnis:**
-- sehr starker analytischer Fortschritt
-- `v12c` war offenbar die funktional stärkste implizite Linie
-- zeigte: verteilte, zustandsbasierte Mechanik ist evolvierbar, aber Retrievalpräzision bleibt begrenzt
-
-**Lerneffekt:**
-Das Projekt braucht einen Mechanismus zwischen reinem Stateful-Readout und hartem Addressing.
+**Key takeaway:**
+Plasticity alone does not replace a clean retrieval mechanism.
 
 ---
 
-### Phase F – Explizites Addressing / adressierte Slots (`v13a`)
+### Phase C – QD-light, archive, and diversity work (`v7`, `v7b`)
 
-**Charakter:**
-- Write-/Read-Addressing
-- adressierte Slots
-- stärkere Trennung von Controller und Speicherzugriff
+**Characteristics:**
+- QD-light / archive experiments
+- broader search-space coverage
+- mechanism diversity instead of pure score maximization
 
-**Ziel dieser Phase:**
-- content-basiertes Retrieval explizit einführen
-- die KV-Lücke mechanistisch direkter schließen
+**Goal of this phase:**
+- not only find one local elite path, but systematically map regions of the search space
+- establish robust descriptors for later analyses
 
-**Ergebnis:**
-- klassischer Addressing-Kollaps
-- diffuse oder symmetrische Adressierung
-- lokale Default-Lösungen
-- funktional schwach im Verhältnis zum Suchraumaufwand
+**Outcome:**
+- better visibility into functional vs. degenerate solutions
+- useful for search-space diagnostics
+- still no true retrieval breakthrough
 
-**Lerneffekt:**
-Explizites Softmax-artiges Routing ist für dieses Evolutionssetup zu fragil.
+**Key takeaway:**
+Search-space diversity helps analysis and exploration, but does not solve the mechanistic core problem by itself.
 
 ---
 
-### Phase G – Delta-Memory-Linie (`stateful_v6_delta_memory`, `v14d`, `v14e`, `v14ff`, `v14g`)
+### Phase D – curriculum and delay studies (`v8a`, `v8b`, `v8c`, `v8d`, `v9a`, `v9b`)
 
-**Charakter:**
-- Übergang auf assoziative Fast-Weight-/Delta-Mechanik
-- keine harte Speicherplatzwahl
-- Retrieval via Matrix-Vektor-Operationen
-- chirurgischeres Überschreiben durch Delta-Korrektur
+**Characteristics:**
+- multi-delay experiments
+- curriculum phases
+- boundary studies
+- KV-easy smoke and mid/full smoke evaluations
 
-**Ziel dieser Phase:**
-- Store und Read content-basiert machen,
-- aber Softmax-Addressing vermeiden,
-- Distraktorresistenz erhöhen,
-- einen kleinen, evolvierbaren Memory-Kern etablieren.
+**Goal of this phase:**
+- test whether gradual task hardening stabilizes the mechanism
+- test delay generalization and robustness
 
-**Ergebnis bis vor V14h:**
-- klar messbare `query_memory_alignment`-Signale
-- numerisch stabile Speichergrößen
-- Delta-Kern ist funktional plausibel
-- aber Retrieval-Hauptmetriken bleiben begrenzt
-- insbesondere schwach:
-  - Query-Key-Match
-  - klare Key-Selektion
-  - saubere Trennung von Store vs. Distraktor im Beta-Gate
+**Outcome:**
+- curricula help partially with training entry
+- the central retrieval barrier still remains
+- `key_value_memory_easy` in particular exposes structural deficits very clearly
 
-**Lerneffekt:**
-Die Delta-Linie ist bislang die beste Brücke zwischen simpler Rekurrenz und Retrieval, aber noch nicht ausreichend entkoppelt im Key/Query-Raum.
+**Key takeaway:**
+Curriculum can smooth optimization, but cannot compensate for the wrong mechanism.
+
+---
+
+### Phase E – KV diagnostics and mechanism decomposition (`v11b`, `v11c`, implicitly `v12`)
+
+**Characteristics:**
+- stronger decomposition into write/read/match diagnostics
+- more explicit retrieval metrics
+- focus on key/value separation and query match
+- functionally strong slot line (`v12c_slots_readoutplus`) as reference
+
+**Goal of this phase:**
+- identify exactly **where** earlier variants fail:
+  - write gate too diffuse?
+  - query match too weak?
+  - value readout unstable?
+  - store/query coupling lost?
+
+**Outcome:**
+- very strong analytical progress
+- `v12c` appears to have been the functionally strongest implicit line
+- showed that distributed, state-based mechanics are evolvable, but retrieval precision stays limited
+
+**Key takeaway:**
+The project needs a mechanism between pure stateful readout and hard addressing.
+
+---
+
+### Phase F – explicit addressing / addressed slots (`v13a`)
+
+**Characteristics:**
+- write/read addressing
+- addressed slots
+- stronger separation of controller and memory access
+
+**Goal of this phase:**
+- introduce content-based retrieval explicitly
+- close the KV gap more directly at the mechanism level
+
+**Outcome:**
+- classic addressing collapse
+- diffuse or symmetric addressing
+- local default solutions
+- functionally weak relative to search-space cost
+
+**Key takeaway:**
+Explicit softmax-like routing is too fragile for this evolutionary setup.
+
+---
+
+### Phase G – delta-memory line (`stateful_v6_delta_memory`, `v14d`, `v14e`, `v14ff`, `v14g`)
+
+**Characteristics:**
+- shift to associative fast-weight / delta mechanics
+- no hard memory-slot selection
+- retrieval via matrix-vector operations
+- more surgical overwrite via delta correction
+
+**Goal of this phase:**
+- make store and read content-based,
+- avoid softmax addressing,
+- increase distractor resistance,
+- establish a small, evolvable memory core.
+
+**Outcome up to pre-V14h:**
+- clearly measurable `query_memory_alignment` signals
+- numerically stable memory magnitudes
+- delta core is functionally plausible
+- but key retrieval metrics remain limited
+- especially weak:
+  - query-key match
+  - clear key selection
+  - clean store-vs-distractor separation in the beta gate
+
+**Key takeaway:**
+The delta line is currently the best bridge between simple recurrence and retrieval, but key/query space is still insufficiently decoupled.
 
 ---
 
 ### Phase H – V14h: bounded post-norm query decoupling
 
-**Charakter:**
-- minimal-invasive Änderung im bestehenden Delta-Pfad
-- keine neue Architekturklasse
-- kein Redesign des Memory-Kerns
-- gezielte Query-Deflation relativ zur Key-Richtung
+**Characteristics:**
+- minimally invasive change in the existing delta path
+- no new architecture class
+- no redesign of the memory core
+- targeted query deflation relative to key direction
 
-**V14h-Hypothese:**
-Der verbleibende Engpass ist weiterhin ein **Symmetrie-/Parallelitätsproblem zwischen Key und Query**, nicht ein Mangel an Speicheraktualisierung.
+**V14h hypothesis:**
+The remaining bottleneck is still a **symmetry/parallelism issue between key and query**, not a lack of memory update capability.
 
-**Konkrete Änderung:**
-Nach Normalisierung von Key und Query wird die Query in begrenztem Ausmaß aus der Key-Richtung herausgedrückt:
+**Concrete change:**
+After normalization of key and query, query is pushed away from key direction within a bounded range:
 
-- glatte Projektion auf zentrierten Vektoren,
+- smooth projection on centered vectors,
 - bounded via `tanh`,
-- partielle Deflation statt harter Orthogonalisierung,
-- danach erneute positive Normalisierung.
+- partial deflation instead of hard orthogonalization,
+- followed by renewed positive normalization.
 
-**Warum minimal-invasiv?**
-- Delta-Update blieb unangetastet
-- Beta-Gate-Logik blieb unangetastet
-- keine neuen Slots
-- kein neuer Variantentyp
-- keine Änderung am grundlegenden Benchmark-Setup
+**Why minimally invasive?**
+- delta update unchanged
+- beta-gate logic unchanged
+- no new slots
+- no new variant type
+- no change to the underlying benchmark setup
 
-**Ergebnis von V14h:**
-- die neue Geometrie-/Decoupling-Telemetrie ist messbar,
-- aber die Retrieval-Hauptmetriken zeigen noch **keinen klaren Durchbruch** gegenüber V14g/V14ff.
+**Outcome of V14h:**
+- new geometry/decoupling telemetry is measurable,
+- but core retrieval metrics still show **no clear breakthrough** versus V14g/V14ff.
 
-Beobachtete Kennzeichen:
-- Decoupling-Effekt ist vorhanden,
-- Key-/Query-Ähnlichkeit bleibt aber hoch,
-- Key-/Query-Varianz ist klein,
-- Speicher normiert stabil,
-- Retrieval bleibt in der Hauptsache weiter begrenzt.
-
----
-
-## Warum der bisher beste Pfad die Delta-Linie ist
-
-Aus heutiger Sicht ist die Delta-Memory-Linie die aussichtsreichste Architekturklasse im Projekt, weil sie:
-
-- **ohne explizites diskretes Addressing** auskommt,
-- content-basiertes Retrieval **mathematisch direkt** ausdrückt,
-- in JAX/Scan kompakt bleibt,
-- mit den Restriktionen kleiner Neuroevolutions-Setups kompatibler ist als NTM/DNC/Slot-Softmax-Routing,
-- und bereits funktionale Signale wie `query_memory_alignment` robust erzeugt.
-
-Der offene Engpass ist nicht mehr „gibt es überhaupt einen Read/Write-Mechanismus?“, sondern:
-
-> Wie bekommt man genügend **Asymmetrie, Varianz und selektive Gate-Differenzierung** in denselben kleinen evolvierbaren Kern?
+Observed indicators:
+- decoupling effect is present,
+- key/query similarity remains high,
+- key/query variance is low,
+- memory norm remains stable,
+- retrieval remains mostly constrained.
 
 ---
 
-## Was das Projekt ausdrücklich nicht will
+## Why the Delta Line Is Currently the Best Path
 
-Mehrfach sichtbar wurde, dass einige theoretisch attraktive Richtungen im gegebenen Setup schlechte Kandidaten sind.
+From today’s perspective, the delta-memory line is the most promising architecture class in the project because it:
 
-### Kein voller Sprung zu O(T²)-Attention
-Zu teuer, zu groß, zu weit weg von der eigentlichen Forschungsfrage.
+- works **without explicit discrete addressing**,
+- expresses content-based retrieval **directly in mathematical form**,
+- stays compact in JAX/Scan,
+- is more compatible with small neuroevolution setups than NTM/DNC/slot-softmax routing,
+- and already produces functional signals such as `query_memory_alignment` robustly.
 
-### Kein NTM/DNC-artiges explizites Addressing
-Zu fragile Softmax-/Routing-Dynamik für kleine evolutionäre Populationen.
+The open bottleneck is no longer “is there any read/write mechanism at all?”, but:
 
-### Kein reines additives Fast-Weight-Gedächtnis ohne Delta-Korrektur
-Zu hohe Gefahr von Overload, Overschreiben und unlesbarem Assoziationsbrei.
-
-### Kein großes Architektur-Redesign pro Iteration
-Das Projekt lebt davon, Hypothesen **inkrementell** an derselben Grundlinie testbar zu machen.
+> How do we get enough **asymmetry, variance, and selective gate differentiation** into the same small evolvable core?
 
 ---
 
-## Aktueller Stand nach V14h
+## What the Project Explicitly Does Not Want
 
-### Was bereits funktioniert
-- reproduzierbare Benchmark-Suite
-- solide Memory-/Retrieval-Diagnostik
-- Archive-/Suchraumanalyse
-- funktionaler Delta-Memory-Kern
-- messbare inhaltsbasierte Auslese
-- stabile Speicher-Normen ohne offensichtlichen numerischen Kollaps
+It became clear multiple times that some theoretically attractive directions are poor candidates in this setup.
 
-### Was noch nicht gelöst ist
-- klare Verbesserung bei `query_key_match_score`
-- robuste Steigerung von `correct_key_selected`
-- robuste Steigerung von `correct_value_selected`
-- deutliche Differenz zwischen Store- und Distraktor-Beta
-- ausreichende strukturelle Trennung von Key- und Query-Geometrie
+### No full jump to O(T²) attention
+Too expensive, too large, too far from the actual research question.
 
-### Ehrliche Kurzbewertung
-Der Projektpfad ist **mechanistisch deutlich gereift**, aber das eigentliche Ziel – **belastbares selektives Retrieval unter Distraktoren** – ist noch nicht vollständig erreicht.
+### No NTM/DNC-like explicit addressing
+Softmax/routing dynamics are too fragile for small evolutionary populations.
+
+### No pure additive fast-weight memory without delta correction
+Too high a risk of overload, overwrite, and unreadable associative clutter.
+
+### No large architecture redesign every iteration
+The project depends on testing hypotheses **incrementally** on the same base line.
 
 ---
 
-## Bisherige Hauptlehren
+## Current Status After V14h
 
-1. **Reine Rekurrenz reicht nicht.**
-   Sie kann Delay-Memory, aber kein sauberes selektives KV-Retrieval unter Distraktoren.
+### What already works
+- reproducible benchmark suite
+- solid memory/retrieval diagnostics
+- archive/search-space analysis
+- functional delta-memory core
+- measurable content-based readout
+- stable memory norms without obvious numerical collapse
 
-2. **Softmax-Addressing ist im gegebenen Setup zu fragil.**
-   Der V13-Pfad belegt das sehr klar.
+### What is not solved yet
+- clear improvement in `query_key_match_score`
+- robust increase in `correct_key_selected`
+- robust increase in `correct_value_selected`
+- strong separation between store and distractor beta
+- sufficient structural separation of key and query geometry
 
-3. **Delta-Memory ist der bisher beste mechanistische Kompromiss.**
-   Es verbindet kleine Form, stabile JAX-Implementierung und inhaltliche Retrieval-Struktur.
-
-4. **Der Engpass ist inzwischen geometrisch, nicht nur energetisch.**
-   Speicheraktivität allein genügt nicht; Key- und Query-Räume müssen selektiv genug auseinandergezogen werden.
-
-5. **Benchmark-getriebene Iteration funktioniert.**
-   Auch wenn noch kein Durchbruch erreicht ist, ist heute wesentlich klarer, warum frühere Linien scheitern.
+### Honest short assessment
+The project path has become **much more mature mechanistically**, but the core goal—**reliable selective retrieval under distractors**—has not been fully achieved yet.
 
 ---
 
-## Empfohlene Lesereihenfolge im Repo
+## Main Lessons So Far
 
-Für einen schnellen Überblick über den bisherigen Stand:
+1. **Pure recurrence is not enough.**
+   It can handle delay memory, but not clean selective KV retrieval under distractors.
+
+2. **Softmax addressing is too fragile in this setup.**
+   The V13 path demonstrates this very clearly.
+
+3. **Delta memory is currently the best mechanistic compromise.**
+   It combines compact form, stable JAX implementation, and meaningful retrieval structure.
+
+4. **The bottleneck is now geometric, not just energetic.**
+   Memory activity alone is insufficient; key and query spaces must be separated selectively enough.
+
+5. **Benchmark-driven iteration works.**
+   Even without a breakthrough yet, it is now much clearer why earlier lines failed.
+
+---
+
+## Recommended Reading Order in the Repo
+
+For a quick overview of the current state:
 
 1. `results/README.md`
-2. ältere Basis- und Smoke-Reports (`v5*`, `v6`, `v7`, `v8*`, `v9*`)
-3. KV-spezifische Reports (`v11*`, `v13a/*`)
-4. Delta-Linie:
+2. older baseline and smoke reports (`v5*`, `v6`, `v7`, `v8*`, `v9*`)
+3. KV-specific reports (`v11*`, `v13a/*`)
+4. Delta line:
    - `results/v14e-delta.md`
    - `results/v14ff-delta.md`
    - `results/v14g-delta.md`
    - `results/v14h-delta.md`
-5. Vergleichsberichte:
+5. Comparison reports:
    - `results/v14e-vs-v14d-v14c-comparison.md`
    - `results/v14ff-vs-v14e-v14d-comparison.md`
    - `results/v14g-vs-v14ff-v14e-v14d-comparison.md`
@@ -394,10 +394,10 @@ Für einen schnellen Überblick über den bisherigen Stand:
 
 ---
 
-## Kurzfazit
+## Short Conclusion
 
-Das Projekt hat sich von einfachen rekurrenten Speicherexperimenten über Plastizitäts- und Curriculum-Studien, Slot- und Addressing-Ansätze hin zu einer **kompakten Delta-Memory-Linie** entwickelt. Diese Linie ist bislang die überzeugendste Kandidatin für das eigentliche Ziel:
+The project evolved from simple recurrent memory experiments through plasticity and curriculum studies, slot and addressing approaches, and finally to a **compact delta-memory line**. So far, this line is the most convincing candidate for the core target:
 
-> **kleines, evolvierbares, content-basiertes Memory-Retrieval ohne Softmax-Addressing-Kollaps**
+> **small, evolvable, content-based memory retrieval without softmax-addressing collapse**
 
-V14h war ein sauberer, kleiner Schritt zur Entkopplung von Key und Query. Er verbessert die Diagnose und zeigt messbare Geometrieeffekte, aber noch keinen eindeutigen Retrieval-Durchbruch. Das Projekt steht damit aktuell an der Schwelle zwischen **funktionalem Delta-Readout** und **wirklich belastbarer selektiver Retrieval-Mechanik**.
+V14h was a clean, small step toward key/query decoupling. It improves diagnostics and shows measurable geometric effects, but not yet a clear retrieval breakthrough. The project currently stands at the threshold between **functional delta readout** and **truly robust selective retrieval mechanics**.
