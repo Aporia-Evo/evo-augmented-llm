@@ -1184,10 +1184,17 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     key_variance_pre = float(np.var(k_t_base))
                     query_variance_pre = float(np.var(q_t_base))
                     key_query_asym = abs(key_seed) / (abs(key_seed) + abs(query_seed) + 1e-6)
+                    key_query_cos_pre = float(
+                        np.dot(q_t_base, k_t_base) / (np.linalg.norm(q_t_base) * np.linalg.norm(k_t_base) + 1e-9)
+                    )
+                    projection_magnitude_pre = abs(
+                        float(np.dot(q_t_base - float(np.mean(q_t_base)), k_t_base - float(np.mean(k_t_base))))
+                    ) / (float(np.linalg.norm(k_t_base - float(np.mean(k_t_base)))) + 1e-9)
                     key_sharpen_logit = (
                         (0.9 * store_signal)
                         + (0.55 * key_query_asym)
                         + (0.35 * (key_variance_pre / (key_variance_pre + 0.0025)))
+                        + (0.2 * (projection_magnitude_pre / (projection_magnitude_pre + 0.1)))
                         - (0.35 * query_signal)
                         - 0.7
                     )
@@ -1206,9 +1213,23 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         - 0.55
                     )
                     congruence_gain = 0.045 * (1.0 + math.tanh(congruence_logit))
+                    margin_logit = (
+                        (1.0 * store_signal)
+                        + (0.4 * key_query_asym)
+                        + (0.35 * (projection_magnitude_pre / (projection_magnitude_pre + 0.1)))
+                        + (0.25 * max(0.0, key_query_cos_pre))
+                        - (0.7 * query_signal)
+                        - 0.7
+                    )
+                    margin_gain = 0.028 * (1.0 + math.tanh(margin_logit))
+                    store_margin_profile = np.maximum(k_centered_pre, 0.0)
+                    store_margin_profile = store_margin_profile / (float(np.sum(store_margin_profile)) + 1e-9)
+                    query_deflate_profile = np.maximum(q_centered_pre, 0.0)
+                    query_deflate_profile = query_deflate_profile / (float(np.sum(query_deflate_profile)) + 1e-9)
                     k_sharpened = (
                         k_t_base * (1.0 + (key_sharpen_gain * k_peaking))
                         + (congruence_gain * query_compat_profile)
+                        + (margin_gain * (store_margin_profile - (0.55 * query_deflate_profile)))
                         + (0.03 * key_sharpen_gain * center_peak)
                     )
                     k_t = _positive_sum_normalize(np.maximum(k_sharpened, 1e-6))
@@ -1245,14 +1266,37 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     projection_magnitude = abs(float(np.dot(q_centered, k_centered))) / (key_center_norm + 1e-9)
                     projection_signal = abs(bounded_projection_coeff) / (abs(bounded_projection_coeff) + 0.15)
                     query_collapse_signal_pre = 0.003 / (query_variance_pre + 0.003)
+                    projection_selectivity_signal = projection_magnitude / (projection_magnitude + 0.12)
                     deflation_logit = (
                         (1.2 * max(0.0, key_query_cos_base))
                         + (0.95 * projection_signal)
                         + (0.7 * query_collapse_signal_pre)
+                        + (0.35 * projection_selectivity_signal)
                         - 0.85
                     )
                     deflation_gain = 1.0 + (0.45 * (1.0 + math.tanh(deflation_logit)))
-                    deflation_vector = 0.35 * deflation_gain * bounded_projection_coeff * k_centered
+                    adaptive_deflation = 0.26 + (
+                        0.12
+                        * (
+                            0.5
+                            + 0.5
+                            * math.tanh(
+                                (0.9 * projection_selectivity_signal)
+                                + (0.65 * max(0.0, key_query_cos_base))
+                                + (0.45 * query_collapse_signal_pre)
+                                - (0.35 * query_signal)
+                                - 0.75
+                            )
+                        )
+                    )
+                    compatibility_relax = 1.0 - (0.22 * query_signal * projection_selectivity_signal)
+                    deflation_vector = (
+                        adaptive_deflation
+                        * compatibility_relax
+                        * deflation_gain
+                        * bounded_projection_coeff
+                        * k_centered
+                    )
                     q_orthogonal_hint = q_centered - (raw_projection_coeff * k_centered)
                     q_orthogonal_norm = float(np.linalg.norm(q_orthogonal_hint))
                     q_orthogonal_term = 0.03 * deflation_gain * (
@@ -1260,7 +1304,23 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     )
                     edge_recentered = edge_peak - float(np.mean(edge_peak))
                     edge_gain = 0.02 * deflation_gain * query_collapse_signal_pre * query_signal
-                    q_decoupled = q_t_base - deflation_vector + q_orthogonal_term + (edge_gain * edge_recentered)
+                    focus_logit = (
+                        (0.9 * query_signal)
+                        + (0.5 * projection_selectivity_signal)
+                        + (0.35 * (1.0 - query_collapse_signal_pre))
+                        - (0.35 * store_signal)
+                        - 0.45
+                    )
+                    focus_gain = 0.012 * (1.0 + math.tanh(focus_logit))
+                    q_focus_profile = np.maximum(q_centered, 0.0)
+                    q_focus_profile = q_focus_profile / (float(np.sum(q_focus_profile)) + 1e-9)
+                    q_decoupled = (
+                        q_t_base
+                        - deflation_vector
+                        + q_orthogonal_term
+                        + (edge_gain * edge_recentered)
+                        + (focus_gain * q_focus_profile)
+                    )
                     q_t = _positive_sum_normalize(np.maximum(q_decoupled, 1e-6))
                     key_variance = float(np.var(k_t))
                     query_variance = float(np.var(q_t))
@@ -1351,9 +1411,20 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     k_update_centered = k_t - float(np.mean(k_t))
                     k_update_std = math.sqrt(key_variance + 1e-9)
                     k_update_peaking = np.tanh(k_update_centered / (k_update_std + 1e-6))
+                    update_margin_gain = 0.018 * (
+                        1.0
+                        + math.tanh(
+                            (0.95 * store_signal)
+                            + (0.45 * write_eligibility)
+                            + (0.3 * key_variance_signal)
+                            - (0.5 * query_signal)
+                            - 0.55
+                        )
+                    )
                     k_update = _positive_sum_normalize(
                         np.maximum(
-                            k_t * (1.0 + (update_focus_gain * k_update_peaking)),
+                            k_t * (1.0 + (update_focus_gain * k_update_peaking))
+                            + (update_margin_gain * store_margin_profile),
                             1e-6,
                         )
                     )
@@ -1380,6 +1451,17 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     q_dominant = q_dominant / (float(np.sum(q_dominant)) + 1e-9)
                     focus_blend = 0.2 + (0.35 * query_focus_quality)
                     q_focus = ((1.0 - focus_blend) * q_focus) + (focus_blend * q_dominant)
+                    q_focus_margin_gain = 0.03 * (
+                        1.0
+                        + math.tanh(
+                            (0.9 * query_signal)
+                            + (0.55 * query_focus_quality)
+                            + (0.35 * projection_signal)
+                            - (0.45 * store_signal)
+                            - 0.6
+                        )
+                    )
+                    q_focus = q_focus + (q_focus_margin_gain * q_focus_profile)
                     q_focus = q_focus / (float(np.sum(q_focus)) + 1e-9)
                     read_mean = float(np.mean(read_t))
                     read_abs_mean = float(np.mean(np.abs(read_t)))
