@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from statistics import mean, pstdev
-from typing import Any, Protocol, Sequence
+from typing import Any, Mapping, Protocol, Sequence
 
 import numpy as np
 
@@ -481,6 +481,7 @@ class KeyValueMemoryEvaluator:
             "query_key_match_score": float(mean([float(evaluation.task_metrics.get("query_key_match_score", 0.0)) for evaluation in evaluations.values()])),
             "value_margin": float(mean([float(evaluation.task_metrics.get("value_margin", 0.0)) for evaluation in evaluations.values()])),
             "distractor_competition_score": float(mean([float(evaluation.task_metrics.get("distractor_competition_score", 0.0)) for evaluation in evaluations.values()])),
+            "delta_retrieval_selection_pressure_bonus": float(mean([float(evaluation.task_metrics.get("delta_retrieval_selection_pressure_bonus", 0.0)) for evaluation in evaluations.values()])),
             "per_delay_metrics": {
                 str(delay_steps): {
                     "score": round(float(evaluation.score), 10),
@@ -497,6 +498,7 @@ class KeyValueMemoryEvaluator:
                     "query_key_match_score": round(float(evaluation.task_metrics.get("query_key_match_score", 0.0)), 10),
                     "value_margin": round(float(evaluation.task_metrics.get("value_margin", 0.0)), 10),
                     "distractor_competition_score": round(float(evaluation.task_metrics.get("distractor_competition_score", 0.0)), 10),
+                    "delta_retrieval_selection_pressure_bonus": round(float(evaluation.task_metrics.get("delta_retrieval_selection_pressure_bonus", 0.0)), 10),
                 }
                 for delay_steps, evaluation in sorted(evaluations.items())
             },
@@ -584,6 +586,21 @@ class KeyValueMemoryEvaluator:
             "value_margin": value_margin,
             "distractor_competition_score": distractor_competition_score,
         }
+        if is_stateful_v6_delta_memory_variant(self.variant):
+            delta_bonus_inputs = {
+                **task_metrics,
+                "store_vs_distractor_beta_gap": float(getattr(episode_metrics, "store_vs_distractor_beta_gap", 0.0)) if episode_metrics is not None else 0.0,
+                "key_query_cosine_mean": float(getattr(episode_metrics, "key_query_cosine_mean", 0.0)) if episode_metrics is not None else 0.0,
+                "key_query_cosine_at_query": float(getattr(episode_metrics, "key_query_cosine_at_query", 0.0)) if episode_metrics is not None else 0.0,
+                "key_variance_mean": float(getattr(episode_metrics, "key_variance_mean", 0.0)) if episode_metrics is not None else 0.0,
+                "query_variance_mean": float(getattr(episode_metrics, "query_variance_mean", 0.0)) if episode_metrics is not None else 0.0,
+            }
+            delta_selection_bonus = _delta_retrieval_selection_pressure_bonus(delta_bonus_inputs)
+            task_metrics["delta_retrieval_selection_pressure_bonus"] = delta_selection_bonus
+            score += delta_selection_bonus
+        else:
+            task_metrics["delta_retrieval_selection_pressure_bonus"] = 0.0
+
         return TemporalSequenceEvaluation(
             score=score,
             sequence_mse=sequence_mse,
@@ -1258,6 +1275,32 @@ def _query_retrieval_breakdown(
         float(mean(value_margins)) if value_margins else 0.0,
         float(mean(distractor_competition_scores)) if distractor_competition_scores else 0.0,
     )
+
+
+def _delta_retrieval_selection_pressure_bonus(metrics: Mapping[str, float]) -> float:
+    correct_key_selected = float(metrics.get("correct_key_selected", 0.0) or 0.0)
+    query_key_match_score = float(metrics.get("query_key_match_score", 0.0) or 0.0)
+    store_vs_distractor_beta_gap = float(metrics.get("store_vs_distractor_beta_gap", 0.0) or 0.0)
+    correct_value_selected = float(metrics.get("correct_value_selected", 0.0) or 0.0)
+
+    key_query_cosine_mean = float(metrics.get("key_query_cosine_mean", 0.0) or 0.0)
+    key_query_cosine_at_query = float(metrics.get("key_query_cosine_at_query", 0.0) or 0.0)
+    key_variance_mean = float(metrics.get("key_variance_mean", 0.0) or 0.0)
+    query_variance_mean = float(metrics.get("query_variance_mean", 0.0) or 0.0)
+
+    bonus = 0.0
+    bonus += 0.36 * correct_key_selected
+    bonus += 0.22 * max(query_key_match_score, 0.0)
+    bonus += 0.14 * max(store_vs_distractor_beta_gap, 0.0)
+    bonus += 0.09 * correct_value_selected
+    bonus -= 0.09 * abs(min(query_key_match_score, 0.0))
+
+    bonus -= 0.015 * max(0.0, key_query_cosine_mean - 0.50)
+    bonus -= 0.015 * max(0.0, key_query_cosine_at_query - 0.50)
+    bonus -= 0.010 * max(0.0, 0.02 - key_variance_mean)
+    bonus -= 0.010 * max(0.0, 0.02 - query_variance_mean)
+
+    return float(np.clip(bonus, -0.15, 0.85))
 
 
 def _mean_role_output(
