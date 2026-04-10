@@ -1284,14 +1284,19 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     read_t = _clip_vector_norm(read_t, max_norm=read_clip_norm)
                     q_centered = q_t - float(np.mean(q_t))
                     query_variance_signal = query_variance / (query_variance + 0.0025)
-                    q_focus_temperature = 4.0 + (1.6 * query_variance_signal)
+                    query_focus_quality = (
+                        (0.5 * query_variance_signal)
+                        + (0.3 * query_signal)
+                        + (0.2 * (1.0 - query_collapse_signal))
+                    )
+                    q_focus_temperature = 4.0 + (1.6 * query_variance_signal) + (1.1 * query_focus_quality)
                     q_focus_logits = q_focus_temperature * q_centered
                     q_focus_logits = q_focus_logits - float(np.max(q_focus_logits))
                     q_focus = np.exp(q_focus_logits)
                     q_focus = q_focus / (float(np.sum(q_focus)) + 1e-9)
                     q_dominant = np.maximum(q_t - float(np.mean(q_t)), 0.0)
                     q_dominant = q_dominant / (float(np.sum(q_dominant)) + 1e-9)
-                    focus_blend = 0.3 * query_variance_signal
+                    focus_blend = 0.2 + (0.35 * query_focus_quality)
                     q_focus = ((1.0 - focus_blend) * q_focus) + (focus_blend * q_dominant)
                     q_focus = q_focus / (float(np.sum(q_focus)) + 1e-9)
                     read_mean = float(np.mean(read_t))
@@ -1300,19 +1305,39 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     read_contrast = float(np.max(read_t) - np.min(read_t))
                     read_separation = read_contrast / (read_abs_mean + 1e-6)
                     separation_gate = math.tanh(read_separation)
+                    contrast_signal = read_contrast / (read_contrast + read_abs_mean + 1e-6)
+                    projection_read_signal = projection_magnitude / (projection_magnitude + 0.12)
                     diffuse_penalty = 1.0 - query_variance_signal
-                    selective_gain = 1.0 + (0.25 * separation_gate * (0.4 + (0.6 * query_variance_signal)))
+                    selective_gain = 1.0 + (
+                        0.45
+                        * separation_gate
+                        * (
+                            (0.35 + (0.65 * query_focus_quality))
+                            * (0.7 + (0.3 * projection_read_signal))
+                        )
+                    )
+                    read_eligibility_logit = (
+                        (1.15 * query_focus_quality)
+                        + (0.65 * contrast_signal)
+                        + (0.45 * projection_read_signal)
+                        - (0.7 * query_collapse_signal)
+                        - (0.45 * max(0.0, key_query_cos))
+                    )
+                    read_eligibility = 0.5 + (0.5 * math.tanh(read_eligibility_logit))
+                    read_contrast_term = math.tanh(read_contrast) * (2.0 * query_signal - 1.0)
                     readout = (
-                        (0.25 * read_mean)
-                        + (0.55 * selective_gain * selective_readout)
-                        + (0.2 * math.tanh(read_contrast) * (2.0 * query_signal - 1.0))
-                        - (0.08 * diffuse_penalty * read_mean)
+                        (0.18 * read_mean)
+                        + (0.67 * selective_gain * selective_readout)
+                        + (0.24 * read_eligibility * read_contrast_term)
+                        - (0.1 * diffuse_penalty * read_mean)
                     )
                     read_gain = max(
                         0.25,
                         min(
                             1.5,
-                            (1.0 + node.slow_input_gain) * (0.5 + (0.8 * query_signal)),
+                            (1.0 + node.slow_input_gain)
+                            * (0.5 + (0.8 * query_signal))
+                            * (0.9 + (0.25 * read_eligibility)),
                         ),
                     )
                     next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
