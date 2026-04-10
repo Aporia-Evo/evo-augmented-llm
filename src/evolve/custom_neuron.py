@@ -1262,7 +1262,11 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     edge_gain = 0.02 * deflation_gain * query_collapse_signal_pre * query_signal
                     q_decoupled = q_t_base - deflation_vector + q_orthogonal_term + (edge_gain * edge_recentered)
                     q_t = _positive_sum_normalize(np.maximum(q_decoupled, 1e-6))
-                    v_t = np.asarray(
+                    key_variance = float(np.var(k_t))
+                    query_variance = float(np.var(q_t))
+                    query_variance_signal = query_variance / (query_variance + 0.0025)
+                    projection_write_signal = projection_magnitude / (projection_magnitude + 0.08)
+                    v_base = np.asarray(
                         [
                             math.tanh(
                                 value_seed + (0.1 * node.content_temperature * (idx - (d_value - 1) / 2.0))
@@ -1274,17 +1278,44 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     state = memory_state[node.node_id]
                     decayed_state = memory_decay * state
                     v_hat_t = decayed_state @ k_t
+                    delta_base = v_base - v_hat_t
+                    raw_delta_norm_base = float(np.linalg.norm(delta_base))
+                    value_norm_base = float(np.linalg.norm(v_base))
+                    novelty_ratio_base = raw_delta_norm_base / (value_norm_base + 1e-6)
+                    novelty_signal_base = novelty_ratio_base / (1.0 + novelty_ratio_base)
+                    value_sep_logit = (
+                        (0.75 * store_signal)
+                        + (0.45 * novelty_signal_base)
+                        + (0.35 * key_query_asym)
+                        + (0.3 * query_variance_signal)
+                        + (0.25 * projection_write_signal)
+                        - (0.65 * query_signal)
+                    )
+                    value_sep_gain = 0.06 + (0.12 * (0.5 + (0.5 * math.tanh(value_sep_logit))))
+                    store_value_preference = 0.75 + (0.25 * store_signal)
+                    sep_axis = np.tanh(
+                        (0.85 * position_axis)
+                        + (0.55 * alt_sign)
+                        + (0.4 * harmonic_sin)
+                        - (0.25 * harmonic_cos)
+                    )
+                    sep_axis = sep_axis / (float(np.linalg.norm(sep_axis)) + 1e-9)
+                    value_centered = v_base - float(np.mean(v_base))
+                    value_spread = math.sqrt(float(np.var(v_base)) + 1e-9)
+                    value_peaking = np.tanh(value_centered / (value_spread + 1e-6))
+                    value_tilt = math.tanh(value_seed) * sep_axis
+                    value_modulation = value_sep_gain * store_value_preference * (
+                        (0.65 * value_peaking) + (0.35 * value_tilt)
+                    )
+                    v_t = np.tanh(v_base + value_modulation)
                     delta_t = v_t - v_hat_t
                     raw_delta_norm = float(np.linalg.norm(delta_t))
                     value_norm = float(np.linalg.norm(v_t))
                     novelty_ratio = raw_delta_norm / (value_norm + 1e-6)
                     novelty_signal = novelty_ratio / (1.0 + novelty_ratio)
-                    key_variance = float(np.var(k_t))
-                    query_variance = float(np.var(q_t))
                     key_query_cos = float(np.dot(q_t, k_t) / (np.linalg.norm(q_t) * np.linalg.norm(k_t) + 1e-9))
                     key_variance_signal = key_variance / (key_variance + 0.003)
                     query_collapse_signal = 0.003 / (query_variance + 0.003)
-                    projection_write_signal = projection_magnitude / (projection_magnitude + 0.08)
                     beta_mix = (
                         (0.45 * beta_base)
                         + (0.25 * store_signal)
@@ -1335,7 +1366,6 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     read_t = decayed_state @ q_t
                     read_t = _clip_vector_norm(read_t, max_norm=read_clip_norm)
                     q_centered = q_t - float(np.mean(q_t))
-                    query_variance_signal = query_variance / (query_variance + 0.0025)
                     query_focus_quality = (
                         (0.5 * query_variance_signal)
                         + (0.3 * query_signal)
@@ -1360,6 +1390,19 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     contrast_signal = read_contrast / (read_contrast + read_abs_mean + 1e-6)
                     projection_read_signal = projection_magnitude / (projection_magnitude + 0.12)
                     diffuse_penalty = 1.0 - query_variance_signal
+                    value_contrast_logit = (
+                        (0.7 * contrast_signal)
+                        + (0.55 * separation_gate)
+                        + (0.35 * query_signal)
+                        + (0.25 * query_variance_signal)
+                        + (0.2 * projection_read_signal)
+                        - (0.3 * max(0.0, key_query_cos))
+                    )
+                    value_contrast_gain = 0.5 + (0.5 * math.tanh(value_contrast_logit))
+                    read_centered = read_t - read_mean
+                    read_center_norm = float(np.linalg.norm(read_centered))
+                    contrast_direction = read_centered / (read_center_norm + 1e-9)
+                    contrast_readout = float(np.dot(contrast_direction, q_focus))
                     selective_gain = 1.0 + (
                         0.45
                         * separation_gate
@@ -1377,10 +1420,15 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     )
                     read_eligibility = 0.5 + (0.5 * math.tanh(read_eligibility_logit))
                     read_contrast_term = math.tanh(read_contrast) * (2.0 * query_signal - 1.0)
+                    selective_weight = 0.61 + (0.08 * value_contrast_gain)
+                    mean_weight = 0.16 - (0.05 * value_contrast_gain)
+                    contrast_term_weight = 0.2 + (0.06 * value_contrast_gain)
+                    contrast_readout_weight = 0.03 + (0.06 * value_contrast_gain)
                     readout = (
-                        (0.18 * read_mean)
-                        + (0.67 * selective_gain * selective_readout)
-                        + (0.24 * read_eligibility * read_contrast_term)
+                        (mean_weight * read_mean)
+                        + (selective_weight * selective_gain * selective_readout)
+                        + (contrast_term_weight * read_eligibility * read_contrast_term)
+                        + (contrast_readout_weight * contrast_readout)
                         - (0.1 * diffuse_penalty * read_mean)
                     )
                     read_gain = max(
