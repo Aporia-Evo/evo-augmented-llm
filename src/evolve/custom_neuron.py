@@ -1515,12 +1515,31 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     q_focus = q_focus / (float(np.sum(q_focus)) + 1e-9)
                     read_mean = float(np.mean(read_t))
                     read_abs_mean = float(np.mean(np.abs(read_t)))
-                    selective_readout = float(np.dot(read_t, q_focus))
+                    projection_read_signal = projection_magnitude / (projection_magnitude + 0.12)
+                    read_centered = read_t - read_mean
+                    read_positive = np.maximum(read_centered, 0.0)
+                    read_positive = read_positive / (float(np.sum(read_positive)) + 1e-9)
+                    value_focus_logit = (
+                        (1.0 * query_signal)
+                        + (0.7 * query_focus_quality)
+                        + (0.45 * projection_read_signal)
+                        + (0.4 * max(0.0, key_query_cos))
+                        + (0.25 * query_variance_signal)
+                        - (0.45 * query_collapse_signal)
+                        - 1.1
+                    )
+                    value_focus_gain = 0.08 * (1.0 + math.tanh(value_focus_logit))
+                    value_focus = _positive_sum_normalize(
+                        np.maximum(
+                            q_focus + (value_focus_gain * (read_positive - q_focus)),
+                            1e-6,
+                        )
+                    )
+                    selective_readout = float(np.dot(read_t, value_focus))
                     read_contrast = float(np.max(read_t) - np.min(read_t))
                     read_separation = read_contrast / (read_abs_mean + 1e-6)
                     separation_gate = math.tanh(read_separation)
                     contrast_signal = read_contrast / (read_contrast + read_abs_mean + 1e-6)
-                    projection_read_signal = projection_magnitude / (projection_magnitude + 0.12)
                     diffuse_penalty = 1.0 - query_variance_signal
                     value_contrast_logit = (
                         (0.7 * contrast_signal)
@@ -1531,10 +1550,20 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         - (0.3 * max(0.0, key_query_cos))
                     )
                     value_contrast_gain = 0.5 + (0.5 * math.tanh(value_contrast_logit))
-                    read_centered = read_t - read_mean
                     read_center_norm = float(np.linalg.norm(read_centered))
                     contrast_direction = read_centered / (read_center_norm + 1e-9)
-                    contrast_readout = float(np.dot(contrast_direction, q_focus))
+                    contrast_readout = float(np.dot(contrast_direction, value_focus))
+                    value_contrast_logit_2 = (
+                        (0.85 * query_signal)
+                        + (0.6 * query_focus_quality)
+                        + (0.55 * contrast_signal)
+                        + (0.45 * projection_read_signal)
+                        + (0.25 * (1.0 - query_collapse_signal))
+                        - (0.4 * max(0.0, key_query_cos))
+                        - 1.0
+                    )
+                    value_contrast_gate = 0.5 + (0.5 * math.tanh(value_contrast_logit_2))
+                    value_contrast_readout = float(np.dot(read_centered, value_focus))
                     selective_gain = 1.0 + (
                         0.45
                         * separation_gate
@@ -1553,15 +1582,17 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     read_eligibility = 0.5 + (0.5 * math.tanh(read_eligibility_logit))
                     read_contrast_term = math.tanh(read_contrast) * (2.0 * query_signal - 1.0)
                     selective_weight = 0.61 + (0.08 * value_contrast_gain)
-                    mean_weight = 0.16 - (0.05 * value_contrast_gain)
+                    mean_weight = 0.13 - (0.05 * value_contrast_gain)
                     contrast_term_weight = 0.2 + (0.06 * value_contrast_gain)
                     contrast_readout_weight = 0.03 + (0.06 * value_contrast_gain)
+                    value_contrast_weight = 0.03 + (0.07 * value_contrast_gain)
                     readout = (
                         (mean_weight * read_mean)
                         + (selective_weight * selective_gain * selective_readout)
                         + (contrast_term_weight * read_eligibility * read_contrast_term)
                         + (contrast_readout_weight * contrast_readout)
-                        - (0.1 * diffuse_penalty * read_mean)
+                        + (value_contrast_weight * value_contrast_gate * value_contrast_readout)
+                        - (0.16 * diffuse_penalty * read_mean)
                     )
                     read_gain = max(
                         0.25,
