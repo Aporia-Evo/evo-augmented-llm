@@ -6,7 +6,11 @@ import numpy as np
 
 from config import TaskConfig
 from evolve.custom_neuron import PlasticityEpisodeMetrics
-from evolve.evaluator import KeyValueMemoryEvaluator, build_evaluator
+from evolve.evaluator import (
+    KeyValueMemoryEvaluator,
+    _delta_retrieval_selection_pressure_bonus,
+    build_evaluator,
+)
 from tasks.key_value_memory import KeyValueMemoryTask
 
 
@@ -105,6 +109,41 @@ def test_key_value_memory_evaluator_reports_retrieval_metrics() -> None:
     assert result.raw_metrics["distractor_competition_score"] >= 0.0
     assert result.raw_metrics["distractor_suppression_ratio"] >= 1.0
     assert result.raw_metrics["mean_abs_slow_state_during_query"] > 0.0
+
+
+def test_delta_retrieval_bonus_does_not_reward_correct_key_selected_dominantly() -> None:
+    # A candidate that only inflates the unreliable ``correct_key_selected``
+    # signal must not beat a candidate with stronger ``correct_value_selected``
+    # / ``query_key_match_score`` even if its raw key-match flag is maximal.
+    fake_key_only = {
+        "correct_key_selected": 1.0,
+        "correct_value_selected": 0.0,
+        "query_key_match_score": 0.0,
+        "store_vs_distractor_beta_gap": 0.0,
+        "key_query_cosine_mean": 0.0,
+        "key_query_cosine_at_query": 0.0,
+        "key_variance_mean": 0.05,
+        "query_variance_mean": 0.05,
+    }
+    real_value_match = {
+        "correct_key_selected": 0.0,
+        "correct_value_selected": 1.0,
+        "query_key_match_score": 0.5,
+        "store_vs_distractor_beta_gap": 0.0,
+        "key_query_cosine_mean": 0.0,
+        "key_query_cosine_at_query": 0.0,
+        "key_variance_mean": 0.05,
+        "query_variance_mean": 0.05,
+    }
+
+    bonus_key_only = _delta_retrieval_selection_pressure_bonus(fake_key_only)
+    bonus_value_match = _delta_retrieval_selection_pressure_bonus(real_value_match)
+
+    # ``correct_key_selected`` may still contribute a small auxiliary boost,
+    # but it must not be the dominant component of the bonus.
+    assert bonus_key_only < 0.10
+    assert bonus_value_match > bonus_key_only
+    assert bonus_value_match > 3.0 * bonus_key_only
 
 
 def test_key_value_memory_curriculum_uses_phase_specific_delays() -> None:
