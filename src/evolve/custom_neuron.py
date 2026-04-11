@@ -1269,6 +1269,17 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     projection_signal = abs(bounded_projection_coeff) / (abs(bounded_projection_coeff) + 0.15)
                     query_collapse_signal_pre = 0.003 / (query_variance_pre + 0.003)
                     projection_selectivity_signal = projection_magnitude / (projection_magnitude + 0.12)
+                    coupled_role_separation_signal = 0.5 + (
+                        0.5
+                        * math.tanh(
+                            (0.55 * key_query_asym)
+                            + (0.45 * projection_selectivity_signal)
+                            + (0.35 * max(0.0, key_query_cos_base))
+                            + (0.25 * store_signal)
+                            - (0.3 * query_signal)
+                            - 0.45
+                        )
+                    )
                     deflation_logit = (
                         (1.2 * max(0.0, key_query_cos_base))
                         + (0.95 * projection_signal)
@@ -1324,34 +1335,37 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         + (focus_gain * q_focus_profile)
                     )
                     q_t = _positive_sum_normalize(np.maximum(q_decoupled, 1e-6))
-                    q_post_centered = q_t - float(np.mean(q_t))
-                    post_projection_coeff = float(np.dot(q_post_centered, k_centered)) / key_center_energy
-                    bounded_post_projection = 0.25 * math.tanh(post_projection_coeff / 0.25)
-                    query_deflation_gain = 0.06 * (
-                        0.5
-                        + 0.5
-                        * math.tanh(
-                            (0.8 * projection_selectivity_signal)
-                            + (0.45 * max(0.0, key_query_cos_base))
-                            + (0.35 * query_collapse_signal_pre)
-                            - (0.5 * query_signal)
-                            - 0.7
+                    extra_deflation_vector = np.zeros_like(q_t)
+                    if step_role == "query":
+                        q_post_centered = q_t - float(np.mean(q_t))
+                        post_projection_coeff = float(np.dot(q_post_centered, k_centered)) / key_center_energy
+                        bounded_post_projection = 0.2 * math.tanh(post_projection_coeff / 0.2)
+                        query_deflation_gain = 0.025 * (
+                            0.5
+                            + 0.5
+                            * math.tanh(
+                                (0.65 * projection_selectivity_signal)
+                                + (0.4 * max(0.0, key_query_cos_base))
+                                + (0.3 * query_collapse_signal_pre)
+                                + (0.25 * coupled_role_separation_signal)
+                                - (0.45 * query_signal)
+                                - 0.65
+                            )
                         )
-                    )
-                    extra_deflation_vector = query_deflation_gain * bounded_post_projection * k_centered
-                    q_t = _positive_sum_normalize(np.maximum(q_t - extra_deflation_vector, 1e-6))
+                        extra_deflation_vector = query_deflation_gain * bounded_post_projection * k_centered
+                        q_t = _positive_sum_normalize(np.maximum(q_t - extra_deflation_vector, 1e-6))
                     key_variance = float(np.var(k_t))
                     if step_role == "store":
                         key_variance_signal_pre = key_variance / (key_variance + 0.003)
                         store_key_sharpen_logit = (
-                            (0.9 * store_signal)
-                            + (0.55 * key_query_asym)
-                            + (0.45 * key_variance_signal_pre)
-                            + (0.35 * (projection_magnitude_pre / (projection_magnitude_pre + 0.1)))
-                            - (0.35 * query_signal)
-                            - 0.8
+                            (0.75 * store_signal)
+                            + (0.4 * key_query_asym)
+                            + (0.3 * key_variance_signal_pre)
+                            + (0.3 * coupled_role_separation_signal)
+                            - (0.3 * query_signal)
+                            - 0.7
                         )
-                        store_key_sharpen_strength = 0.05 * (1.0 + math.tanh(store_key_sharpen_logit))
+                        store_key_sharpen_strength = 0.015 * (1.0 + math.tanh(store_key_sharpen_logit))
                         sharpen_exponent = 1.0 + store_key_sharpen_strength
                         k_t = _positive_sum_normalize(np.power(np.maximum(k_t, 1e-6), sharpen_exponent))
                         k_centered = k_t - float(np.mean(k_t))
