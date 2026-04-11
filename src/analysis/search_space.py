@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean, pstdev
 from typing import Iterable, Sequence
@@ -486,6 +486,178 @@ def derive_search_space_hints(records: Sequence[CandidateFeatureRecord]) -> list
             hints.append("HOF- und Nicht-HOF-Kandidaten liegen bei mean_eta nah beieinander.")
 
     return hints
+
+
+def render_cross_label_search_space_report(
+    records_by_label: dict[str, Sequence[CandidateFeatureRecord]],
+    *,
+    top_hint_count: int = 3,
+) -> str:
+    labels = [label for label in records_by_label.keys()]
+    if not labels:
+        return "No benchmark labels provided.\n"
+
+    non_empty_labels = [label for label in labels if records_by_label[label]]
+    lines: list[str] = [
+        "# Search-Space Cross-Label Comparison",
+        "",
+        f"- labels: {', '.join(labels)}",
+        "",
+    ]
+    if not non_empty_labels:
+        lines.append("No candidate features found for the requested labels.")
+        return "\n".join(lines).rstrip() + "\n"
+
+    tracked_features = [
+        "plastic_d_at_zero_fraction",
+        "plastic_d_at_lower_bound_fraction",
+        "clamp_hit_rate",
+        "mean_abs_delta_w",
+        "max_abs_delta_w",
+        "slot_utilization",
+        "mean_abs_fast_state",
+        "mean_abs_slow_state",
+        "slow_fast_contribution_ratio",
+    ]
+    lines.extend(
+        [
+            "## Compact Metrics",
+            "",
+            _render_table(
+                ["label", "rows", *tracked_features],
+                [
+                    [
+                        label,
+                        str(len(records_by_label[label])),
+                        *[
+                            _format_stat(_safe_mean(_values(records_by_label[label], feature)))
+                            for feature in tracked_features
+                        ],
+                    ]
+                    for label in non_empty_labels
+                ],
+            ),
+            "",
+            "## Top Hints by Label",
+            "",
+        ]
+    )
+    for label in labels:
+        records = records_by_label[label]
+        lines.append(f"### {label}")
+        if not records:
+            lines.append("- No rows found.")
+            lines.append("")
+            continue
+        hints = derive_search_space_hints(records)
+        for hint in hints[: max(1, top_hint_count)]:
+            lines.append(f"- {hint}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+@dataclass(frozen=True)
+class SearchSpaceSnapshot:
+    label: str
+    candidate_count: int | None
+    feature_means: dict[str, float]
+    hints: list[str]
+
+
+def load_search_space_snapshot_from_markdown(path: Path, *, label: str) -> SearchSpaceSnapshot:
+    if not path.exists():
+        raise FileNotFoundError(f"Search-space markdown report not found: {path}")
+    candidate_count: int | None = None
+    feature_means: dict[str, float] = {}
+    hints: list[str] = []
+    in_feature_table = False
+    in_hint_section = False
+    with path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if line.startswith("## "):
+                in_feature_table = line == "## Feature Stats"
+                in_hint_section = line == "## Hints"
+                continue
+            if line.startswith("|") and "candidates" in line and "hof_candidates" in line:
+                continue
+            if line.startswith("|") and in_feature_table:
+                if line.startswith("| ---"):
+                    continue
+                cells = [cell.strip() for cell in line.strip("|").split("|")]
+                if len(cells) >= 3 and cells[0] and cells[0] != "feature":
+                    try:
+                        feature_means[cells[0]] = float(cells[1])
+                    except ValueError:
+                        continue
+                continue
+            if line.startswith("|") and candidate_count is None and not in_feature_table:
+                cells = [cell.strip() for cell in line.strip("|").split("|")]
+                if len(cells) >= 4 and cells[0].isdigit():
+                    candidate_count = int(cells[0])
+                    continue
+            if in_hint_section and line.startswith("- "):
+                hints.append(line[2:])
+    return SearchSpaceSnapshot(
+        label=label,
+        candidate_count=candidate_count,
+        feature_means=feature_means,
+        hints=hints,
+    )
+
+
+def render_cross_label_snapshot_report(
+    snapshots: Sequence[SearchSpaceSnapshot],
+    *,
+    top_hint_count: int = 3,
+) -> str:
+    if not snapshots:
+        return "No benchmark labels provided.\n"
+    tracked_features = [
+        "plastic_d_at_zero_fraction",
+        "plastic_d_at_lower_bound_fraction",
+        "clamp_hit_rate",
+        "mean_abs_delta_w",
+        "max_abs_delta_w",
+        "slot_utilization",
+        "mean_abs_fast_state",
+        "mean_abs_slow_state",
+        "slow_fast_contribution_ratio",
+    ]
+    lines = [
+        "# Search-Space Cross-Label Comparison",
+        "",
+        f"- labels: {', '.join(snapshot.label for snapshot in snapshots)}",
+        "",
+        "## Compact Metrics",
+        "",
+        _render_table(
+            ["label", "rows", *tracked_features],
+            [
+                [
+                    snapshot.label,
+                    str(snapshot.candidate_count) if snapshot.candidate_count is not None else "n/a",
+                    *[
+                        _format_stat(snapshot.feature_means.get(feature))
+                        for feature in tracked_features
+                    ],
+                ]
+                for snapshot in snapshots
+            ],
+        ),
+        "",
+        "## Top Hints by Label",
+        "",
+    ]
+    for snapshot in snapshots:
+        lines.append(f"### {snapshot.label}")
+        if not snapshot.hints:
+            lines.append("- No hints found.")
+        else:
+            for hint in snapshot.hints[: max(1, top_hint_count)]:
+                lines.append(f"- {hint}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _render_group_comparison_table(

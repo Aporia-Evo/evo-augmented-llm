@@ -15,8 +15,14 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from analysis.search_space import (
+    SearchSpaceSnapshot,
+    SUMMARY_FEATURES,
+    derive_search_space_hints,
     filter_feature_records,
     load_feature_records_from_jsonl,
+    load_search_space_snapshot_from_markdown,
+    render_cross_label_snapshot_report,
+    render_cross_label_search_space_report,
     render_search_space_report,
     write_feature_records_jsonl,
 )
@@ -470,6 +476,32 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument("--output-dir", default="results")
     analyze_parser.add_argument("--server-url", default=None)
     analyze_parser.add_argument("--database-name", default=None)
+
+    cross_label_parser = subparsers.add_parser(
+        "analyze-search-space-cross-labels",
+        help="Compare search-space diagnostics across multiple benchmark labels",
+    )
+    cross_label_parser.add_argument(
+        "--benchmark-labels",
+        required=True,
+        help="Comma-separated benchmark labels to compare, for example: v14r-delta,v14t-delta,v14u-delta",
+    )
+    cross_label_parser.add_argument("--task", choices=TASK_CHOICES, default=None)
+    cross_label_parser.add_argument("--variant", choices=VARIANT_CHOICES, default=None)
+    cross_label_parser.add_argument("--delay", type=int, default=None)
+    cross_label_parser.add_argument(
+        "--curriculum-phase",
+        choices=["phase_1", "phase_2", "static"],
+        default=None,
+        help="Optional curriculum phase filter for candidate-feature analysis.",
+    )
+    cross_label_parser.add_argument("--output-dir", default="results")
+    cross_label_parser.add_argument(
+        "--report-name",
+        default="v15e-search-space-cross-variant.md",
+        help="Output markdown filename written under --output-dir.",
+    )
+    cross_label_parser.add_argument("--top-hints", type=int, default=3)
 
     archive_parser = subparsers.add_parser(
         "analyze-archive",
@@ -2166,6 +2198,83 @@ def _print_search_space_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_label_list(raw_labels: str) -> list[str]:
+    labels = [item.strip() for item in raw_labels.split(",")]
+    parsed = [item for item in labels if item]
+    if not parsed:
+        raise ValueError("At least one benchmark label is required.")
+    return parsed
+
+
+def _print_cross_label_search_space_report(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir)
+    labels = _parse_label_list(args.benchmark_labels)
+    records_by_label: dict[str, list[CandidateFeatureRecord]] = {}
+    snapshot_fallback = False
+    snapshots = []
+    missing_labels: list[str] = []
+    for label in labels:
+        feature_path = _feature_export_path(output_dir, label)
+        if feature_path.exists():
+            records = load_feature_records_from_jsonl(feature_path)
+            records_by_label[label] = filter_feature_records(
+                records,
+                benchmark_label=label,
+                task_name=args.task,
+                variant=args.variant,
+                delay_steps=args.delay,
+                curriculum_phase=args.curriculum_phase,
+            )
+            continue
+        snapshot_fallback = True
+        markdown_path = output_dir / f"{label}-search-space.md"
+        if markdown_path.exists():
+            snapshots.append(
+                load_search_space_snapshot_from_markdown(
+                    markdown_path,
+                    label=label,
+                )
+            )
+        else:
+            missing_labels.append(label)
+    if snapshot_fallback:
+        for label, records in records_by_label.items():
+            feature_means = {
+                feature: (sum(getattr(record, feature) for record in records) / len(records))
+                for feature in SUMMARY_FEATURES
+            } if records else {}
+            snapshots.append(
+                SearchSpaceSnapshot(
+                    label=label,
+                    candidate_count=len(records),
+                    feature_means=feature_means,
+                    hints=derive_search_space_hints(records),
+                )
+            )
+        snapshots.sort(key=lambda snapshot: labels.index(snapshot.label))
+        report = render_cross_label_snapshot_report(
+            snapshots,
+            top_hint_count=max(1, args.top_hints),
+        )
+    else:
+        report = render_cross_label_search_space_report(
+            records_by_label,
+            top_hint_count=max(1, args.top_hints),
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = output_dir / args.report_name
+    if missing_labels:
+        report = (
+            report.rstrip()
+            + "\n\n## Missing Labels\n\n"
+            + "\n".join(f"- {label}: no candidate-feature export or search-space markdown found" for label in missing_labels)
+            + "\n"
+        )
+    report_path.write_text(report, encoding="utf-8")
+    print(f"Wrote cross-label search-space report: {report_path}")
+    return 0
+
+
 def _load_archive_records(args: argparse.Namespace) -> tuple[list[ArchiveCellRecord], list[ArchiveEventRecord], list[CandidateFeatureRecord]]:
     if args.store == "memory":
         output_dir = Path(args.output_dir)
@@ -2319,6 +2428,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "analyze-search-space":
         return _print_search_space_report(args)
+    if args.command == "analyze-search-space-cross-labels":
+        return _print_cross_label_search_space_report(args)
 
     if args.command == "analyze-archive":
         return _print_archive_report(args)
