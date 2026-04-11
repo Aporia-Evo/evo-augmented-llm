@@ -356,6 +356,7 @@ class BitMemoryEvaluator:
 
 class KeyValueMemoryEvaluator:
     task_name = "key_value_memory"
+    soft_base_score_alpha = 0.25
 
     def __init__(
         self,
@@ -538,7 +539,10 @@ class KeyValueMemoryEvaluator:
         exact_scores = exact_matches.astype(np.float32)
         soft_scores = 1.0 - np.abs(query_values - target_values)
         soft_scores = np.clip(soft_scores, 0.0, 1.0)
-        score = float(np.sum(exact_scores))
+        score = float(
+            np.sum(exact_scores)
+            + (self.soft_base_score_alpha * np.sum(soft_scores - exact_scores))
+        )
         query_accuracy = float(np.mean(exact_scores))
         retrieval_score = float(np.mean(soft_scores))
         sequence_mse = float(np.mean((predictions - task.target_sequences) ** 2))

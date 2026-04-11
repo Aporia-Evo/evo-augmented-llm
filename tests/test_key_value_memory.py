@@ -58,15 +58,18 @@ def test_key_value_memory_profiles_scale_retrieval_difficulty() -> None:
 
 def test_key_value_memory_evaluator_reports_retrieval_metrics() -> None:
     task = KeyValueMemoryTask.create(delay_steps=3)
-    evaluator = KeyValueMemoryEvaluator(task=task, activation_steps=1)
+    evaluator = KeyValueMemoryEvaluator(task=task, activation_steps=1, key_value_profile=task.profile_name)
 
     class DummyExecutor:
         def __init__(self, outputs: np.ndarray) -> None:
-            self._outputs = iter(outputs)
+            self._outputs = outputs
+            self._index = 0
 
         def run_sequence(self, genome: object, sample: np.ndarray, *, step_roles: tuple[str, ...] | None = None) -> np.ndarray:
             del genome, sample, step_roles
-            return next(self._outputs)
+            output = self._outputs[self._index % self._outputs.shape[0]]
+            self._index += 1
+            return output
 
         def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
             return PlasticityEpisodeMetrics(
@@ -109,6 +112,79 @@ def test_key_value_memory_evaluator_reports_retrieval_metrics() -> None:
     assert result.raw_metrics["distractor_competition_score"] >= 0.0
     assert result.raw_metrics["distractor_suppression_ratio"] >= 1.0
     assert result.raw_metrics["mean_abs_slow_state_during_query"] > 0.0
+
+
+def test_key_value_memory_soft_base_scoring_preserves_exact_success_and_ranks_near_misses() -> None:
+    task = KeyValueMemoryTask.create(delay_steps=8, profile="kv_easy")
+    evaluator = KeyValueMemoryEvaluator(task=task, activation_steps=1, key_value_profile=task.profile_name)
+
+    class DummyExecutor:
+        def __init__(self, outputs: np.ndarray) -> None:
+            self._outputs = outputs
+            self._index = 0
+
+        def run_sequence(self, genome: object, sample: np.ndarray, *, step_roles: tuple[str, ...] | None = None) -> np.ndarray:
+            del genome, sample, step_roles
+            output = self._outputs[self._index % self._outputs.shape[0]]
+            self._index += 1
+            return output
+
+        def last_episode_metrics(self) -> PlasticityEpisodeMetrics:
+            return PlasticityEpisodeMetrics(
+                plasticity_enabled=False,
+                mean_abs_delta_w=0.0,
+                max_abs_delta_w=0.0,
+                clamp_hit_rate=0.0,
+                plasticity_active_fraction=0.0,
+                mean_abs_decay_term=0.0,
+                max_abs_decay_term=0.0,
+                decay_effect_ratio=0.0,
+                decay_near_zero_fraction=0.0,
+                mean_abs_fast_state=0.0,
+                mean_abs_slow_state=0.0,
+                slow_fast_contribution_ratio=0.0,
+                mean_abs_fast_state_during_store=0.0,
+                mean_abs_slow_state_during_store=0.0,
+                mean_abs_fast_state_during_query=0.0,
+                mean_abs_slow_state_during_query=0.0,
+                mean_abs_fast_state_during_distractor=0.0,
+                mean_abs_slow_state_during_distractor=0.0,
+            )
+
+    def build_outputs(query_values: np.ndarray) -> np.ndarray:
+        raw_outputs = np.zeros_like(task.target_sequences, dtype=np.float32)
+        raw_outputs[:, -1, 0] = (query_values * 2.0) - 1.0
+        return raw_outputs
+
+    target_ids = task.query_target_ids.astype(np.int64)
+    value_levels = np.asarray(task.value_levels, dtype=np.float32)
+    target_values = value_levels[target_ids]
+    wrong_ids = (target_ids + 1) % value_levels.shape[0]
+    wrong_values = value_levels[wrong_ids]
+
+    near_values = target_values.copy()
+    worse_values = target_values.copy()
+    half = target_values.shape[0] // 2
+    near_values[half:] = wrong_values[half:] + (0.49 * (target_values[half:] - wrong_values[half:]))
+    worse_values[half:] = wrong_values[half:]
+
+    perfect_outputs = build_outputs(target_values)
+    near_outputs = build_outputs(near_values)
+    worse_outputs = build_outputs(worse_values)
+
+    evaluator.executor = DummyExecutor(perfect_outputs)  # type: ignore[assignment]
+    perfect = evaluator.evaluate(genome=object())  # type: ignore[arg-type]
+    evaluator.executor = DummyExecutor(near_outputs)  # type: ignore[assignment]
+    near = evaluator.evaluate(genome=object())  # type: ignore[arg-type]
+    evaluator.executor = DummyExecutor(worse_outputs)  # type: ignore[assignment]
+    worse = evaluator.evaluate(genome=object())  # type: ignore[arg-type]
+
+    assert perfect.score == evaluator.score_ceiling
+    assert perfect.raw_metrics["success"] is True
+    assert near.raw_metrics["success"] is False
+    assert worse.raw_metrics["success"] is False
+    assert near.raw_metrics["query_accuracy"] == worse.raw_metrics["query_accuracy"]
+    assert near.score > worse.score
 
 
 def test_delta_retrieval_bonus_does_not_reward_correct_key_selected_dominantly() -> None:
