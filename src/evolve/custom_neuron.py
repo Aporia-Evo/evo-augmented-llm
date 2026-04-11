@@ -1573,9 +1573,28 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             0.5 + (0.5 * math.tanh(query_focus_sharpen_logit))
                         )
                         q_focus_centered = q_focus - float(np.mean(q_focus))
+                        # Scale the sharpening argument by the actual spread
+                        # of ``q_focus`` rather than the hardcoded 0.05 that
+                        # was used in v14x. ``q_focus`` is a probability
+                        # distribution over ``d_key`` slots with mean
+                        # ``1/d_key`` (~0.125 for d_key=8), so a constant
+                        # denominator of 0.05 drove every entry of
+                        # ``q_focus_centered / 0.05`` deep into the tanh
+                        # saturation region and collapsed the sharpening
+                        # into an effectively binary sign multiplier. Using
+                        # the runtime std (with an eps floor) makes the
+                        # sharpening scale-invariant: ``tanh`` now sees a
+                        # z-score in the ~[-1, 1] band and reshapes
+                        # ``q_focus`` smoothly in proportion to how far
+                        # each slot sits from the mean of the current
+                        # distribution, instead of sign-flipping.
+                        q_focus_scale = float(np.std(q_focus)) + 1e-6
                         q_focus = q_focus * (
                             1.0
-                            + (query_focus_sharpen_strength * np.tanh(q_focus_centered / 0.05))
+                            + (
+                                query_focus_sharpen_strength
+                                * np.tanh(q_focus_centered / q_focus_scale)
+                            )
                         )
                         q_focus = _positive_sum_normalize(np.maximum(q_focus, 1e-6))
                     read_mean = float(np.mean(read_t))

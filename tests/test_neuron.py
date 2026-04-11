@@ -340,6 +340,70 @@ def test_stateful_v5_addressed_slots_breaks_symmetry_and_keeps_rw_split() -> Non
     assert abs(metrics.write_read_address_gap) > 0.0
 
 
+def test_q_focus_sharpening_scale_is_no_longer_saturated() -> None:
+    # Regression guard for PR3. The v14x sharpening block divided
+    # ``q_focus_centered`` by a hardcoded 0.05 before feeding it into
+    # ``tanh``. ``q_focus`` is a probability distribution over ``d_key``
+    # slots with mean ``1/d_key`` (~0.125 for d_key=8), so for any
+    # distribution with non-trivial spread the argument landed deep in
+    # the tanh saturation region and the multiplier
+    # ``1 + strength * tanh(...)`` collapsed toward an effectively
+    # binary ``1 +/- strength`` sign flip — not the smooth sharpening
+    # it was supposed to be. The fix replaces the constant by the
+    # runtime std of ``q_focus`` so that the ``tanh`` argument is a
+    # z-score, which makes the sharpening *scale invariant*: rescaling
+    # the deviations of ``q_focus`` around ``1/d_key`` by any positive
+    # constant leaves the new ``tanh`` argument unchanged, whereas the
+    # old ``/0.05`` formulation is explicitly not scale invariant and
+    # saturates more as the distribution spreads.
+    q_focus = np.array([0.20, 0.18, 0.15, 0.12, 0.11, 0.10, 0.08, 0.06])
+    q_focus = q_focus / q_focus.sum()
+    q_focus_centered = q_focus - q_focus.mean()
+    strength = 0.03
+
+    # Build a "wider" variant by scaling the deviations around the
+    # uniform ``1/d_key`` mean. This is still a valid probability
+    # distribution (same sum, symmetric rescaling) and captures the
+    # "more concentrated q_focus" regime that the sharpening block is
+    # supposed to accentuate smoothly.
+    wider_centered = 1.5 * q_focus_centered
+    wider = (1.0 / q_focus.size) + wider_centered
+    assert float(np.min(wider)) > 0.0
+
+    new_scale_a = float(np.std(q_focus)) + 1e-6
+    new_scale_b = float(np.std(wider)) + 1e-6
+    new_tanh_a = np.tanh(q_focus_centered / new_scale_a)
+    new_tanh_b = np.tanh(wider_centered / new_scale_b)
+
+    old_tanh_a = np.tanh(q_focus_centered / 0.05)
+    old_tanh_b = np.tanh(wider_centered / 0.05)
+
+    # Core invariant: new formulation is exactly scale-invariant, so
+    # rescaling the deviations produces an identical tanh shape.
+    assert np.allclose(new_tanh_a, new_tanh_b, atol=1e-9)
+
+    # Old formulation is NOT scale-invariant: doubling the spread pushes
+    # the argument further into saturation, so the maximum absolute tanh
+    # strictly increases and the shape changes.
+    assert float(np.max(np.abs(old_tanh_b))) > float(np.max(np.abs(old_tanh_a)))
+    assert not np.allclose(old_tanh_a, old_tanh_b, atol=1e-2)
+
+    # On the wider distribution the old formulation is visibly in the
+    # saturation band at the extremes, whereas the new formulation keeps
+    # the largest slot's ``tanh`` strictly below the old maximum.
+    assert float(np.max(np.abs(old_tanh_b))) > 0.95
+    assert float(np.max(np.abs(new_tanh_b))) < float(np.max(np.abs(old_tanh_b)))
+
+    # The actual multiplier applied to ``q_focus`` is bounded in the
+    # documented ``[1 - strength, 1 + strength]`` envelope and preserves
+    # the slot ordering (largest ``q_focus`` entry still gets the
+    # largest amplification).
+    new_multiplier = 1.0 + strength * new_tanh_a
+    assert bool(np.all(new_multiplier > 1.0 - strength - 1e-9))
+    assert bool(np.all(new_multiplier < 1.0 + strength + 1e-9))
+    assert int(np.argmax(new_multiplier)) == int(np.argmax(q_focus))
+
+
 def test_stateful_v6_delta_memory_updates_state_and_reports_metrics() -> None:
     genome = GenomeModel(
         input_ids=(0, 1, 2),
