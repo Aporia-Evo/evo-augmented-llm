@@ -1298,17 +1298,20 @@ def _delta_retrieval_selection_pressure_bonus(metrics: Mapping[str, float]) -> f
     # dominant term of this selection bonus. Real fitness pressure should
     # come from ``correct_value_selected`` (exact value-id match) and the
     # margin metric ``query_key_match_score``.
-    bonus = 0.0
-    bonus += 0.40 * correct_value_selected
-    bonus += 0.25 * max(query_key_match_score, 0.0)
-    bonus += 0.14 * max(store_vs_distractor_beta_gap, 0.0)
-    bonus += 0.05 * correct_key_selected
-    bonus -= 0.09 * abs(min(query_key_match_score, 0.0))
+    positive_query_match = float(np.tanh(max(query_key_match_score, 0.0)))
+    positive_beta_gap = float(np.tanh(max(store_vs_distractor_beta_gap, 0.0)))
 
-    bonus -= 0.015 * max(0.0, key_query_cosine_mean - 0.50)
-    bonus -= 0.015 * max(0.0, key_query_cosine_at_query - 0.50)
-    bonus -= 0.010 * max(0.0, 0.02 - key_variance_mean)
-    bonus -= 0.010 * max(0.0, 0.02 - query_variance_mean)
+    bonus = 0.0
+    bonus += 0.45 * correct_value_selected
+    bonus += 0.22 * positive_query_match
+    bonus += 0.16 * positive_beta_gap
+    bonus += 0.02 * correct_key_selected
+    bonus -= 0.08 * abs(min(query_key_match_score, 0.0))
+
+    bonus -= 0.012 * max(0.0, key_query_cosine_mean - 0.50)
+    bonus -= 0.012 * max(0.0, key_query_cosine_at_query - 0.50)
+    bonus -= 0.008 * max(0.0, 0.02 - key_variance_mean)
+    bonus -= 0.008 * max(0.0, 0.02 - query_variance_mean)
 
     return float(np.clip(bonus, -0.15, 0.85))
 
