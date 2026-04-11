@@ -1288,11 +1288,21 @@ def _delta_retrieval_selection_pressure_bonus(metrics: Mapping[str, float]) -> f
     key_variance_mean = float(metrics.get("key_variance_mean", 0.0) or 0.0)
     query_variance_mean = float(metrics.get("query_variance_mean", 0.0) or 0.0)
 
+    # NOTE: ``correct_key_selected`` is *not* a reliable key-selection signal.
+    # It is derived from value-distance ranking against in-sample competitor
+    # store values in ``_query_retrieval_breakdown``: it goes to 1.0 whenever
+    # the prediction is at least as close to the target value as to any
+    # competitor's value, which is trivially true when two store slots happen
+    # to share a value level (common for kv_easy/kv_full) and degenerate for
+    # kv_trivial (no competitors at all). It must therefore not be the
+    # dominant term of this selection bonus. Real fitness pressure should
+    # come from ``correct_value_selected`` (exact value-id match) and the
+    # margin metric ``query_key_match_score``.
     bonus = 0.0
-    bonus += 0.36 * correct_key_selected
-    bonus += 0.22 * max(query_key_match_score, 0.0)
+    bonus += 0.40 * correct_value_selected
+    bonus += 0.25 * max(query_key_match_score, 0.0)
     bonus += 0.14 * max(store_vs_distractor_beta_gap, 0.0)
-    bonus += 0.09 * correct_value_selected
+    bonus += 0.05 * correct_key_selected
     bonus -= 0.09 * abs(min(query_key_match_score, 0.0))
 
     bonus -= 0.015 * max(0.0, key_query_cosine_mean - 0.50)
