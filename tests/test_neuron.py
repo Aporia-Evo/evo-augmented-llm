@@ -442,6 +442,16 @@ def test_stateful_v6_delta_memory_updates_state_and_reports_metrics() -> None:
     assert metrics.delta_correction_magnitude > 0.0
     assert metrics.memory_read_strength > 0.0
     assert metrics.store_vs_distractor_beta_gap != 0.0
+    # ``query_memory_alignment`` must no longer be a silent clone of
+    # ``key_query_cosine_at_query`` (the historical V14a bug where both
+    # slots got the same ``key_query_cos`` value).
+    assert np.isfinite(metrics.query_memory_alignment)
+    assert 0.0 <= metrics.query_memory_alignment <= 1.0 + 1e-6
+    assert not np.isclose(
+        metrics.query_memory_alignment,
+        metrics.key_query_cosine_at_query,
+        atol=1e-6,
+    )
 
 
 def _single_connection_genome(

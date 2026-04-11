@@ -1695,7 +1695,26 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     elif step_role == "query":
                         beta_query_vals.append(beta_t)
                         query_update_vals.append(float(np.linalg.norm(update, ord="fro")))
-                        query_alignment_vals.append(key_query_cos)
+                        # Query<->Memory alignment diagnostic. Previously this
+                        # list was populated with ``key_query_cos`` which made
+                        # ``query_memory_alignment`` a silent clone of
+                        # ``key_query_cosine_at_query``. The real quantity of
+                        # interest is how strongly the query extracts signal
+                        # from the memory being read, so we use a normalized
+                        # ratio of the memory readout magnitude versus the
+                        # trivial Cauchy-Schwarz ceiling
+                        # ``||q_t|| * ||decayed_state||_F``. The result is
+                        # bounded in [0, 1] and reuses only tensors that are
+                        # already computed at query time.
+                        q_t_norm = float(np.linalg.norm(q_t))
+                        decayed_state_norm = float(
+                            np.linalg.norm(decayed_state, ord="fro")
+                        )
+                        read_norm = float(np.linalg.norm(read_t))
+                        query_memory_alignment_step = read_norm / (
+                            (q_t_norm * decayed_state_norm) + 1e-9
+                        )
+                        query_alignment_vals.append(query_memory_alignment_step)
                         key_query_cosine_query_vals.append(key_query_cos)
                 outputs = next_outputs
             sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
