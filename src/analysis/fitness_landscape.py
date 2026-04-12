@@ -114,7 +114,7 @@ def _spearman(x: Sequence[float], y: Sequence[float]) -> float:
 
 VERDICT_FLAT = "flat-gradient"
 VERDICT_DECEPTIVE = "deceptive-local-optimum"
-VERDICT_WEAK_MONOTONE = "weak-but-monotone-gradient"
+VERDICT_WEAK_MONOTONE = "weak-monotone-gradient"
 
 
 @dataclass(frozen=True)
