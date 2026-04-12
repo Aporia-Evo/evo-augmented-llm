@@ -244,6 +244,18 @@ class GenerationSuiteAggregate:
     mean_memory_frobenius_norm: float | None = None
 
 
+@dataclass(frozen=True)
+class CandidateGenomeExportRecord:
+    benchmark_label: str
+    run_id: str
+    generation_id: int
+    candidate_id: str
+    task_name: str
+    variant: str
+    seed: int
+    genome_blob: str
+
+
 class CliObserver:
     def on_run_started(self, run: RunRecord) -> None:
         variant = _variant_from_run(run)
@@ -929,6 +941,7 @@ def _print_generation_benchmark_suite_report(args: argparse.Namespace) -> int:
     all_feature_records: list[CandidateFeatureRecord] = []
     all_archive_cells: list[ArchiveCellRecord] = []
     all_archive_events: list[ArchiveEventRecord] = []
+    all_candidate_genomes: list[CandidateGenomeExportRecord] = []
     label = args.label or f"generation-suite-{utc_now_iso().replace(':', '').replace('-', '')}"
 
     print(
@@ -979,7 +992,7 @@ def _print_generation_benchmark_suite_report(args: argparse.Namespace) -> int:
             benchmark_label=label,
             on_summary=_print_generation_benchmark_progress,
         )
-        all_rows.extend(
+        task_rows = [
             _build_generation_benchmark_row(
                 repository=repository,
                 summary=summary,
@@ -987,6 +1000,14 @@ def _print_generation_benchmark_suite_report(args: argparse.Namespace) -> int:
                 population_size=task_config.evolution.population_size,
             )
             for summary in task_summaries
+        ]
+        all_rows.extend(task_rows)
+        all_candidate_genomes.extend(
+            _collect_candidate_genome_exports(
+                repository=repository,
+                benchmark_label=label,
+                rows=task_rows,
+            )
         )
         all_feature_records.extend(
             repository.list_candidate_features(
@@ -1035,10 +1056,16 @@ def _print_generation_benchmark_suite_report(args: argparse.Namespace) -> int:
         label=label,
         records=all_archive_events,
     )
+    candidate_genomes_path = _write_candidate_genome_exports(
+        output_dir=output_dir,
+        label=label,
+        records=all_candidate_genomes,
+    )
     print(
         "generation_suite_exports "
         f"jsonl={export_paths['jsonl']} csv={export_paths['csv']} markdown={export_paths['markdown']} "
-        f"features_jsonl={feature_path} archive_cells_jsonl={archive_cell_path} archive_events_jsonl={archive_event_path}",
+        f"features_jsonl={feature_path} archive_cells_jsonl={archive_cell_path} "
+        f"archive_events_jsonl={archive_event_path} candidate_genomes_jsonl={candidate_genomes_path}",
         flush=True,
     )
     return 0
@@ -1709,6 +1736,10 @@ def _feature_export_path(output_dir: Path, label: str) -> Path:
     return output_dir / f"{label}.candidate-features.jsonl"
 
 
+def _candidate_genome_export_path(output_dir: Path, label: str) -> Path:
+    return output_dir / f"{label}.candidate-genomes.jsonl"
+
+
 def _write_generation_feature_exports(
     *,
     output_dir: Path,
@@ -1718,6 +1749,54 @@ def _write_generation_feature_exports(
     output_dir.mkdir(parents=True, exist_ok=True)
     path = _feature_export_path(output_dir, label)
     write_feature_records_jsonl(path, records)
+    return str(path)
+
+
+def _collect_candidate_genome_exports(
+    *,
+    repository: RunRepository,
+    benchmark_label: str,
+    rows: Sequence[GenerationBenchmarkRow],
+) -> list[CandidateGenomeExportRecord]:
+    exports: list[CandidateGenomeExportRecord] = []
+    seen_candidate_ids: set[str] = set()
+    for row in rows:
+        if row.best_generation_id is None or row.best_candidate_id is None:
+            continue
+        if row.best_candidate_id in seen_candidate_ids:
+            continue
+        candidates = repository.list_candidates(row.run_id, row.best_generation_id)
+        matching = next((cand for cand in candidates if cand.candidate_id == row.best_candidate_id), None)
+        if matching is None:
+            continue
+        exports.append(
+            CandidateGenomeExportRecord(
+                benchmark_label=benchmark_label,
+                run_id=row.run_id,
+                generation_id=row.best_generation_id,
+                candidate_id=row.best_candidate_id,
+                task_name=row.task_name,
+                variant=row.variant,
+                seed=row.seed,
+                genome_blob=matching.genome_blob,
+            )
+        )
+        seen_candidate_ids.add(row.best_candidate_id)
+    return exports
+
+
+def _write_candidate_genome_exports(
+    *,
+    output_dir: Path,
+    label: str,
+    records: list[CandidateGenomeExportRecord],
+) -> str:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = _candidate_genome_export_path(output_dir, label)
+    with path.open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(stable_json_dumps(asdict(record)))
+            handle.write("\n")
     return str(path)
 
 
@@ -2432,7 +2511,7 @@ def _print_curriculum_boundary_report(args: argparse.Namespace) -> int:
 def _print_retrieval_trace_report(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
 
-    # Load genome blob from candidate features.
+    # Load candidate features.
     if args.store == "memory":
         feature_path = _feature_export_path(output_dir, args.benchmark_label)
         records = load_feature_records_from_jsonl(feature_path)
@@ -2458,14 +2537,26 @@ def _print_retrieval_trace_report(args: argparse.Namespace) -> int:
         chosen = max(records, key=lambda r: r.final_max_score)
         print(f"Using top scorer: candidate_id={chosen.candidate_id} score={chosen.final_max_score:.4f}")
 
-    # Load genome blob. In memory-mode the records don't carry genome_blob,
-    # so we need to load the elites/candidates from the DB. For the simpler
-    # case where only the feature jsonl is available, the genome blob is
-    # unavailable — we run the trace with a fresh kv_easy episode to show
-    # what a genome at this fitness level "looks like" in terms of the
-    # per-step diagnostics.
     genome = None
-    if args.store == "spacetimedb":
+    if args.store == "memory":
+        genome_path = _candidate_genome_export_path(output_dir, args.benchmark_label)
+        if genome_path.exists():
+            raw_rows = [json.loads(line) for line in genome_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            matching = next(
+                (row for row in raw_rows if row.get("candidate_id") == chosen.candidate_id),
+                None,
+            )
+            if matching is not None and str(matching.get("genome_blob", "")).strip():
+                genome = genome_model_from_blob(str(matching["genome_blob"]))
+        if genome is None:
+            print(
+                "Genome blob not available in local artifacts. "
+                f"Expected candidate mapping in {genome_path}. "
+                "Re-run benchmark-suite to generate *.candidate-genomes.jsonl, "
+                "or use --store spacetimedb."
+            )
+            return 1
+    else:
         config = _load_runtime_config(DEFAULT_CONFIGS)
         repo = _spacetime_repository(config, args.server_url, args.database_name)
         elites = repo.list_elites(chosen.run_id, limit=50)
@@ -2481,11 +2572,7 @@ def _print_retrieval_trace_report(args: argparse.Namespace) -> int:
                     break
 
     if genome is None:
-        print(
-            "Genome blob not available in local feature export. "
-            "Use --store spacetimedb to load genome from the database, "
-            "or re-run the benchmark with genome export enabled."
-        )
+        print("Failed to resolve genome blob for the requested candidate.")
         return 1
 
     result = run_retrieval_trace(
