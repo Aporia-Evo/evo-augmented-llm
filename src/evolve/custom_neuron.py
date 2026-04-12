@@ -1069,7 +1069,15 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         input_sequence: Sequence[Sequence[float]],
         *,
         step_roles: Sequence[str] | None = None,
+        trace_sink: list[dict[str, object]] | None = None,
     ) -> np.ndarray:
+        # ``trace_sink`` is a passive diagnostic hook. When ``None`` (the default
+        # and the only value used on the production evaluation path), this
+        # method behaves exactly as before: no extra state, no extra allocation,
+        # no change to the math. When a list is supplied the executor appends
+        # one per-step-per-node dict describing the internal state of the
+        # delta-memory read/write path; this is consumed by
+        # ``src/analysis/retrieval_trace.py``.
         incoming_by_target = _incoming_connections_by_target(genome)
         d_key = 8
         d_value = 8
@@ -1117,6 +1125,9 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
             step_role = _step_role_at(step_roles, step_index)
             input_map = {node_id: float(value) for node_id, value in zip(genome.input_ids, inputs, strict=True)}
             outputs.update(input_map)
+            step_capture: dict[int, dict[str, object]] | None = (
+                {} if trace_sink is not None else None
+            )
             for _ in range(self.activation_steps):
                 previous_outputs = dict(outputs)
                 next_outputs = dict(input_map)
@@ -1716,7 +1727,64 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         )
                         query_alignment_vals.append(query_memory_alignment_step)
                         key_query_cosine_query_vals.append(key_query_cos)
+                    if step_capture is not None:
+                        # Passive per-node snapshot of the delta-memory hot
+                        # path. Overwritten on each activation sub-iteration so
+                        # the final entry in ``step_capture`` reflects the last
+                        # sub-iteration of the outer step, matching what the
+                        # evaluator sees.
+                        q_t_norm_cap = float(np.linalg.norm(q_t))
+                        decayed_state_norm_cap = float(
+                            np.linalg.norm(decayed_state, ord="fro")
+                        )
+                        read_norm_cap = float(np.linalg.norm(read_t))
+                        query_memory_alignment_cap = read_norm_cap / (
+                            (q_t_norm_cap * decayed_state_norm_cap) + 1e-9
+                        )
+                        step_capture[node.node_id] = {
+                            "node_id": int(node.node_id),
+                            "is_output": bool(node.is_output),
+                            "beta_base": float(beta_base),
+                            "beta_t": float(beta_t),
+                            "store_signal": float(store_signal),
+                            "query_signal": float(query_signal),
+                            "key_query_cos_base": float(key_query_cos_base),
+                            "key_query_cos_post": float(key_query_cos),
+                            "k_t": [float(value) for value in k_t],
+                            "q_t": [float(value) for value in q_t],
+                            "q_focus": [float(value) for value in q_focus],
+                            "v_t": [float(value) for value in v_t],
+                            "read_t": [float(value) for value in read_t],
+                            "memory_frob_pre": decayed_state_norm_cap,
+                            "memory_frob_post": float(
+                                np.linalg.norm(new_state, ord="fro")
+                            ),
+                            "query_memory_alignment": query_memory_alignment_cap,
+                            "readout_scalar": float(readout),
+                            "selective_readout": float(selective_readout),
+                            "read_contrast": float(read_contrast),
+                            "readout_selectivity": (
+                                abs(selective_readout - read_mean)
+                                / (read_abs_mean + 1e-6)
+                            ),
+                            "update_frob": float(
+                                np.linalg.norm(update, ord="fro")
+                            ),
+                            "delta_correction": float(
+                                np.linalg.norm(delta_t)
+                            ),
+                            "node_output": float(next_outputs[node.node_id]),
+                        }
                 outputs = next_outputs
+            if trace_sink is not None and step_capture is not None:
+                for node_id, snapshot in step_capture.items():
+                    trace_sink.append(
+                        {
+                            "step_index": int(step_index),
+                            "step_role": str(step_role),
+                            **snapshot,
+                        }
+                    )
             sequence_outputs.append(np.array([outputs.get(node_id, 0.0) for node_id in genome.output_ids], dtype=np.float32))
         mean_store_beta = float(np.mean(beta_store_vals)) if beta_store_vals else 0.0
         mean_distractor_beta = float(np.mean(beta_distractor_vals)) if beta_distractor_vals else 0.0
