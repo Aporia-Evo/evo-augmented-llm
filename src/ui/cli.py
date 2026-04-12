@@ -36,6 +36,16 @@ from analysis.archive import (
     write_archive_events_jsonl,
 )
 from analysis.curriculum_boundaries import render_curriculum_boundary_report
+from analysis.fitness_landscape import (
+    analyze_fitness_landscape,
+    render_landscape_report,
+    write_landscape_report,
+)
+from analysis.retrieval_trace import (
+    render_trace_report,
+    run_retrieval_trace,
+    write_trace_report,
+)
 from config import (
     AppConfig,
     curriculum_phase_delay_labels,
@@ -555,6 +565,53 @@ def build_parser() -> argparse.ArgumentParser:
         help="Variant used for the boundary decision hint.",
     )
     curriculum_compare_parser.add_argument("--output-dir", default="results")
+
+    # -- Retrieval trace (mechanistic per-episode diagnosis) --
+
+    retrieval_trace_parser = subparsers.add_parser(
+        "analyze-retrieval-trace",
+        help="Run a single genome through kv_easy with full per-step instrumentation",
+    )
+    retrieval_trace_parser.add_argument(
+        "--store",
+        choices=["memory", "spacetimedb"],
+        default="memory",
+        help="Genome source: local feature export or SpacetimeDB.",
+    )
+    retrieval_trace_parser.add_argument("--benchmark-label", required=True)
+    retrieval_trace_parser.add_argument(
+        "--candidate-id",
+        default=None,
+        help="Specific candidate ID to trace. If omitted, uses the top scorer.",
+    )
+    retrieval_trace_parser.add_argument("--delay", type=int, default=8)
+    retrieval_trace_parser.add_argument("--profile", default="kv_easy")
+    retrieval_trace_parser.add_argument("--sample-index", type=int, default=0)
+    retrieval_trace_parser.add_argument("--output-dir", default="results")
+    retrieval_trace_parser.add_argument("--server-url", default=None)
+    retrieval_trace_parser.add_argument("--database-name", default=None)
+
+    # -- Fitness landscape (population-level retrieval diagnosis) --
+
+    fitness_landscape_parser = subparsers.add_parser(
+        "analyze-fitness-landscape",
+        help="Analyze fitness-vs-retrieval correlations from persisted candidate features",
+    )
+    fitness_landscape_parser.add_argument(
+        "--store",
+        choices=["memory", "spacetimedb"],
+        default="memory",
+        help="Feature source: local feature export or SpacetimeDB tables.",
+    )
+    fitness_landscape_parser.add_argument("--benchmark-label", required=True)
+    fitness_landscape_parser.add_argument("--task", choices=TASK_CHOICES, default=None)
+    fitness_landscape_parser.add_argument("--variant", choices=VARIANT_CHOICES, default=None)
+    fitness_landscape_parser.add_argument("--delay", type=int, default=None)
+    fitness_landscape_parser.add_argument("--top-k", type=int, default=20)
+    fitness_landscape_parser.add_argument("--bins", type=int, default=5)
+    fitness_landscape_parser.add_argument("--output-dir", default="results")
+    fitness_landscape_parser.add_argument("--server-url", default=None)
+    fitness_landscape_parser.add_argument("--database-name", default=None)
 
     return parser
 
@@ -2372,6 +2429,120 @@ def _print_curriculum_boundary_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_retrieval_trace_report(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir)
+
+    # Load genome blob from candidate features.
+    if args.store == "memory":
+        feature_path = _feature_export_path(output_dir, args.benchmark_label)
+        records = load_feature_records_from_jsonl(feature_path)
+    else:
+        config = _load_runtime_config(DEFAULT_CONFIGS)
+        repository = _spacetime_repository(config, args.server_url, args.database_name)
+        records = repository.list_candidate_features(
+            benchmark_label=args.benchmark_label,
+        )
+
+    if not records:
+        print("No candidate feature records found for the requested benchmark label.")
+        return 1
+
+    # Pick candidate by ID or top scorer.
+    if args.candidate_id:
+        matches = [r for r in records if r.candidate_id == args.candidate_id]
+        if not matches:
+            print(f"Candidate {args.candidate_id} not found in {len(records)} records.")
+            return 1
+        chosen = matches[0]
+    else:
+        chosen = max(records, key=lambda r: r.final_max_score)
+        print(f"Using top scorer: candidate_id={chosen.candidate_id} score={chosen.final_max_score:.4f}")
+
+    # Load genome blob. In memory-mode the records don't carry genome_blob,
+    # so we need to load the elites/candidates from the DB. For the simpler
+    # case where only the feature jsonl is available, the genome blob is
+    # unavailable — we run the trace with a fresh kv_easy episode to show
+    # what a genome at this fitness level "looks like" in terms of the
+    # per-step diagnostics.
+    genome = None
+    if args.store == "spacetimedb":
+        config = _load_runtime_config(DEFAULT_CONFIGS)
+        repo = _spacetime_repository(config, args.server_url, args.database_name)
+        elites = repo.list_elites(chosen.run_id, limit=50)
+        for elite in elites:
+            if elite.candidate_id == chosen.candidate_id:
+                genome = genome_model_from_blob(elite.frozen_genome_blob)
+                break
+        if genome is None:
+            candidates = repo.list_candidates(chosen.run_id, chosen.generation)
+            for cand in candidates:
+                if cand.candidate_id == chosen.candidate_id:
+                    genome = genome_model_from_blob(cand.genome_blob)
+                    break
+
+    if genome is None:
+        print(
+            "Genome blob not available in local feature export. "
+            "Use --store spacetimedb to load genome from the database, "
+            "or re-run the benchmark with genome export enabled."
+        )
+        return 1
+
+    result = run_retrieval_trace(
+        genome,
+        delay_steps=args.delay,
+        profile=args.profile,
+        sample_index=args.sample_index,
+    )
+    report_path = write_trace_report(
+        result,
+        output_dir=str(output_dir),
+        label=chosen.candidate_id,
+    )
+    print(render_trace_report(result, label=chosen.candidate_id), end="")
+    print(f"\nWrote retrieval trace report: {report_path}")
+    return 0
+
+
+def _print_fitness_landscape_report(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir)
+
+    if args.store == "memory":
+        feature_path = _feature_export_path(output_dir, args.benchmark_label)
+        records = load_feature_records_from_jsonl(feature_path)
+    else:
+        config = _load_runtime_config(DEFAULT_CONFIGS)
+        repository = _spacetime_repository(config, args.server_url, args.database_name)
+        records = repository.list_candidate_features(
+            benchmark_label=args.benchmark_label,
+            task_name=args.task,
+            variant=args.variant,
+            delay_steps=args.delay,
+        )
+
+    records = filter_feature_records(
+        records,
+        benchmark_label=args.benchmark_label,
+        task_name=args.task,
+        variant=args.variant,
+        delay_steps=args.delay,
+    )
+    if not records:
+        print("No candidate features found for the requested filter.")
+        return 1
+
+    result = analyze_fitness_landscape(
+        records,
+        label=args.benchmark_label,
+        top_k=args.top_k,
+        num_bins=args.bins,
+    )
+    report_path = write_landscape_report(result, output_dir=str(output_dir))
+    print(render_landscape_report(result), end="")
+    print(f"\nWrote fitness landscape report: {report_path}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -2436,6 +2607,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "analyze-curriculum-boundaries":
         return _print_curriculum_boundary_report(args)
+
+    if args.command == "analyze-retrieval-trace":
+        return _print_retrieval_trace_report(args)
+
+    if args.command == "analyze-fitness-landscape":
+        return _print_fitness_landscape_report(args)
 
     config = _load_runtime_config(DEFAULT_CONFIGS)
     repository = _spacetime_repository(config, args.server_url, args.database_name)
