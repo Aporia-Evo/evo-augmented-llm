@@ -46,6 +46,12 @@ from analysis.retrieval_trace import (
     run_retrieval_trace,
     write_trace_report,
 )
+from analysis.retrieval_trace_sweep import (
+    SweepCandidate,
+    resolve_local_sweep_inputs,
+    run_retrieval_trace_sweep,
+    write_retrieval_trace_sweep_report,
+)
 from config import (
     AppConfig,
     curriculum_phase_delay_labels,
@@ -67,7 +73,7 @@ from db.reducers import InMemoryRepository, RunRepository, SpacetimeRepository
 from evolve.benchmark_runner import run_online_benchmark
 from evolve.archive import DEFAULT_QD_PROFILE, archive_profile_names
 from evolve.evaluator import score_ceiling_for_task
-from evolve.genome_codec import genome_model_from_blob
+from evolve.genome_codec import GenomeModel, genome_model_from_blob
 from evolve.online_loop import execute_online_run
 from evolve.run_loop import execute_run
 from ui.compare_report import build_online_benchmark_aggregates, build_online_compare_summary
@@ -602,6 +608,30 @@ def build_parser() -> argparse.ArgumentParser:
     retrieval_trace_parser.add_argument("--output-dir", default="results")
     retrieval_trace_parser.add_argument("--server-url", default=None)
     retrieval_trace_parser.add_argument("--database-name", default=None)
+
+    retrieval_trace_sweep_parser = subparsers.add_parser(
+        "analyze-retrieval-trace-sweep",
+        help="Run retrieval trace diagnostics across top candidates and episodes",
+    )
+    retrieval_trace_sweep_parser.add_argument(
+        "--store",
+        choices=["memory", "spacetimedb"],
+        default="memory",
+        help="Genome source: local feature export or SpacetimeDB.",
+    )
+    retrieval_trace_sweep_parser.add_argument("--benchmark-label", required=True)
+    retrieval_trace_sweep_parser.add_argument("--task", choices=TASK_CHOICES, default="key_value_memory")
+    retrieval_trace_sweep_parser.add_argument("--variant", choices=VARIANT_CHOICES, default="stateful_v6_delta_memory")
+    retrieval_trace_sweep_parser.add_argument("--top-k-candidates", type=int, default=5)
+    retrieval_trace_sweep_parser.add_argument(
+        "--episodes-per-candidate",
+        type=int,
+        default=0,
+        help="Number of deterministic kv_easy samples per candidate; <=0 means all samples.",
+    )
+    retrieval_trace_sweep_parser.add_argument("--output-dir", default="results")
+    retrieval_trace_sweep_parser.add_argument("--server-url", default=None)
+    retrieval_trace_sweep_parser.add_argument("--database-name", default=None)
 
     # -- Fitness landscape (population-level retrieval diagnosis) --
 
@@ -2630,6 +2660,88 @@ def _print_fitness_landscape_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_retrieval_trace_sweep_report(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir)
+    records: list[CandidateFeatureRecord] | list[SweepCandidate]
+    genomes_by_candidate: dict[str, GenomeModel]
+    candidate_source = "spacetimedb"
+    try:
+        if args.store == "memory":
+            local_inputs = resolve_local_sweep_inputs(
+                output_dir=output_dir,
+                benchmark_label=args.benchmark_label,
+                task_name=args.task,
+                variant=args.variant,
+            )
+            records = list(local_inputs.candidates)
+            genomes_by_candidate = dict(local_inputs.genomes_by_candidate)
+            candidate_source = local_inputs.source_used
+            print(
+                "Using local artifact source "
+                f"'{local_inputs.source_used}' for candidate discovery."
+            )
+        else:
+            config = _load_runtime_config(DEFAULT_CONFIGS)
+            repository = _spacetime_repository(config, args.server_url, args.database_name)
+            records = repository.list_candidate_features(
+                benchmark_label=args.benchmark_label,
+                task_name=args.task,
+                variant=args.variant,
+            )
+            filtered_records = filter_feature_records(
+                records,
+                benchmark_label=args.benchmark_label,
+                task_name=args.task,
+                variant=args.variant,
+            )
+            if not filtered_records:
+                print("No candidate feature records found for retrieval-trace sweep.")
+                return 1
+            records = filtered_records
+            genomes_by_candidate = {}
+    except FileNotFoundError as exc:
+        print(str(exc))
+        return 1
+
+    if args.store != "memory":
+        config = _load_runtime_config(DEFAULT_CONFIGS)
+        repository = _spacetime_repository(config, args.server_url, args.database_name)
+        ranked = sorted(records, key=lambda r: r.final_max_score, reverse=True)  # type: ignore[attr-defined]
+        for record in ranked[: max(1, int(args.top_k_candidates))]:
+            genome = None
+            elites = repository.list_elites(record.run_id, limit=50)
+            for elite in elites:
+                if elite.candidate_id == record.candidate_id:
+                    genome = genome_model_from_blob(elite.frozen_genome_blob)
+                    break
+            if genome is None:
+                candidates = repository.list_candidates(record.run_id, record.generation)
+                for candidate in candidates:
+                    if candidate.candidate_id == record.candidate_id:
+                        genome = genome_model_from_blob(candidate.genome_blob)
+                        break
+            if genome is not None:
+                genomes_by_candidate[record.candidate_id] = genome
+
+    result = run_retrieval_trace_sweep(
+        benchmark_label=args.benchmark_label,
+        task_name=args.task,
+        variant=args.variant,
+        candidate_records=records,
+        genomes_by_candidate=genomes_by_candidate,
+        top_k_candidates=args.top_k_candidates,
+        episodes_per_candidate=None if args.episodes_per_candidate <= 0 else args.episodes_per_candidate,
+    )
+    result = replace(result, candidate_source=candidate_source)
+    report_path = write_retrieval_trace_sweep_report(
+        result,
+        output_dir=output_dir,
+    )
+    print(report_path.read_text(encoding="utf-8"), end="")
+    print(f"\nWrote retrieval trace sweep report: {report_path}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -2697,6 +2809,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "analyze-retrieval-trace":
         return _print_retrieval_trace_report(args)
+
+    if args.command == "analyze-retrieval-trace-sweep":
+        return _print_retrieval_trace_sweep_report(args)
 
     if args.command == "analyze-fitness-landscape":
         return _print_fitness_landscape_report(args)

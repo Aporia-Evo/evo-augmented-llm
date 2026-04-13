@@ -23,8 +23,14 @@ from analysis.fitness_landscape import (
     analyze_fitness_landscape,
     render_landscape_report,
 )
+from analysis import retrieval_trace_sweep as sweep
 from db.models import CandidateFeatureRecord
-from evolve.genome_codec import ConnectionGeneModel, GenomeModel, NodeGeneModel
+from evolve.genome_codec import (
+    ConnectionGeneModel,
+    GenomeModel,
+    NodeGeneModel,
+    genome_model_to_blob,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -294,3 +300,132 @@ def test_landscape_report_writes_to_file(tmp_path: Path) -> None:
     assert path.exists()
     content = path.read_text(encoding="utf-8")
     assert "write-test" in content
+
+
+def test_retrieval_trace_sweep_verdict_is_allowed(monkeypatch) -> None:
+    records = [
+        _feature_record(candidate_id="c-1", run_id="r-1", benchmark_label="test", final_max_score=6.0, success=False),
+        _feature_record(candidate_id="c-2", run_id="r-2", benchmark_label="test", final_max_score=5.8, success=False),
+    ]
+
+    class _FakeVerdict:
+        def __init__(self, mode: str) -> None:
+            self.mode = mode
+
+    class _FakeTraceResult:
+        def __init__(self, sample_index: int) -> None:
+            mode = FAILURE_QUERY_ALIGNMENT if sample_index % 2 == 0 else FAILURE_READOUT_COLLAPSE
+            self.trace = [
+                {
+                    "step_role": "query",
+                    "key_query_cos_post": 0.1,
+                    "query_memory_alignment": 0.1,
+                    "readout_selectivity": 0.05,
+                }
+            ]
+            self.raw_outputs = np.asarray([[0.0], [0.1]], dtype=np.float64)
+            self.predicted_value_ids = [0]
+            self.target_value_ids = [1]
+            self.value_levels = (0.0, 0.5, 1.0)
+            self.step_roles = ("store", "query")
+            self.verdict = _FakeVerdict(mode)
+
+    def _fake_run_retrieval_trace(*args, **kwargs):
+        return _FakeTraceResult(int(kwargs.get("sample_index", 0)))
+
+    monkeypatch.setattr(sweep, "run_retrieval_trace", _fake_run_retrieval_trace)
+
+    result = sweep.run_retrieval_trace_sweep(
+        benchmark_label="test",
+        task_name="key_value_memory",
+        variant="stateful_v6_delta_memory",
+        candidate_records=records,
+        genomes_by_candidate={"c-1": _delta_genome(), "c-2": _delta_genome()},
+        top_k_candidates=2,
+        episodes_per_candidate=3,
+    )
+    report = sweep.render_retrieval_trace_sweep_report(result)
+
+    assert result.final_verdict in sweep.ALLOWED_FINAL_VERDICTS
+    assert "## 5. Final verdict" in report
+    assert "## 2. Candidate table" in report
+
+
+def test_resolve_local_sweep_inputs_falls_back_to_candidate_genomes(tmp_path: Path) -> None:
+    genome = _delta_genome()
+    row = {
+        "benchmark_label": "v15f-delta",
+        "run_id": "run-1",
+        "generation_id": 12,
+        "candidate_id": "cand-1",
+        "task_name": "key_value_memory",
+        "variant": "stateful_v6_delta_memory",
+        "seed": 7,
+        "genome_blob": genome_model_to_blob(genome),
+    }
+    path = tmp_path / "v15f-delta.candidate-genomes.jsonl"
+    import json
+
+    path.write_text(f"{json.dumps(row)}\n", encoding="utf-8")
+
+    resolved = sweep.resolve_local_sweep_inputs(
+        output_dir=tmp_path,
+        benchmark_label="v15f-delta",
+        task_name="key_value_memory",
+        variant="stateful_v6_delta_memory",
+    )
+    assert resolved.source_used == "candidate-genomes"
+    assert len(resolved.candidates) == 1
+    assert resolved.candidates[0].candidate_id == "cand-1"
+    assert "cand-1" in resolved.genomes_by_candidate
+
+
+def test_resolve_local_sweep_inputs_prefers_benchmark_jsonl_over_genomes(tmp_path: Path) -> None:
+    import json
+
+    genome = _delta_genome()
+    blob = genome_model_to_blob(genome)
+    (tmp_path / "demo.candidate-genomes.jsonl").write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "benchmark_label": "demo",
+                    "run_id": "run-g",
+                    "generation_id": 1,
+                    "candidate_id": candidate_id,
+                    "task_name": "key_value_memory",
+                    "variant": "stateful_v6_delta_memory",
+                    "seed": 7,
+                    "genome_blob": blob,
+                }
+            )
+            for candidate_id in ("cand-a", "cand-b")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "demo.jsonl").write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "run_id": "run-j",
+                    "candidate_id": candidate_id,
+                    "task_name": "key_value_memory",
+                    "variant": "stateful_v6_delta_memory",
+                    "final_max_score": score,
+                }
+            )
+            for candidate_id, score in (("cand-a", 1.0), ("cand-b", 2.0))
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    resolved = sweep.resolve_local_sweep_inputs(
+        output_dir=tmp_path,
+        benchmark_label="demo",
+        task_name="key_value_memory",
+        variant="stateful_v6_delta_memory",
+    )
+    assert resolved.source_used == "benchmark-jsonl"
+    assert {c.candidate_id for c in resolved.candidates} == {"cand-a", "cand-b"}
