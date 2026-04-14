@@ -14,6 +14,7 @@ from evolve.custom_neuron import (
     StatefulV6DeltaMemoryNetworkExecutor,
     StatefulV4SlotsNetworkExecutor,
     StatefulV2NetworkExecutor,
+    _match_conditioned_focus_sharpen,
     _positive_sum_normalize,
     _product_key_focus,
     clamp_alpha,
@@ -113,6 +114,42 @@ def test_product_key_focus_degrades_gracefully_for_tiny_vectors() -> None:
     focus = _product_key_focus(empty_half)
     # Second half has zero mass -> fall back to plain positive sum normalize.
     assert np.allclose(focus, _positive_sum_normalize(empty_half))
+
+
+def test_match_conditioned_focus_sharpen_is_noop_on_nonpositive_match() -> None:
+    # v15l-B: negative or zero key/query cosine must leave q_focus untouched
+    # so the new lever cannot amplify mis-aligned readouts.
+    q_focus = _positive_sum_normalize(
+        np.array([0.05, 0.1, 0.6, 0.05, 0.05, 0.05, 0.05, 0.05], dtype=np.float64)
+    )
+    for cos in (-0.9, -0.1, 0.0):
+        sharpened = _match_conditioned_focus_sharpen(q_focus, cos)
+        assert np.allclose(sharpened, q_focus)
+
+
+def test_match_conditioned_focus_sharpen_increases_peak_but_stays_bounded() -> None:
+    # v15l-B: at maximum positive match the sharpening must (a) raise the
+    # peak probability, (b) lower Shannon entropy, but (c) stay bounded so
+    # an already-peaked distribution does not collapse into a Dirac spike.
+    q_focus = _positive_sum_normalize(
+        np.array([0.04, 0.06, 0.5, 0.04, 0.06, 0.2, 0.05, 0.05], dtype=np.float64)
+    )
+    sharpened = _match_conditioned_focus_sharpen(q_focus, 1.0)
+    assert sharpened.max() > q_focus.max()
+    assert sharpened.max() < 0.95  # bounded - no dirac collapse
+    base_entropy = -float(np.sum(q_focus * np.log(q_focus + 1e-12)))
+    sharp_entropy = -float(np.sum(sharpened * np.log(sharpened + 1e-12)))
+    assert sharp_entropy < base_entropy
+    assert np.isclose(float(np.sum(sharpened)), 1.0, atol=1e-6)
+
+
+def test_match_conditioned_focus_sharpen_leaves_uniform_distribution_unchanged() -> None:
+    # v15l-B: power-sharpening a uniform distribution must be a fixed point
+    # (any positive exponent on a constant vector renormalises back to itself),
+    # so the lever cannot inject spurious structure where there is none.
+    uniform = np.full(8, 1.0 / 8.0, dtype=np.float64)
+    sharpened = _match_conditioned_focus_sharpen(uniform, 1.0)
+    assert np.allclose(sharpened, uniform)
 
 
 def test_plastic_executor_matches_stateful_when_eta_is_zero() -> None:

@@ -112,6 +112,30 @@ def _clip_vector_norm(vec: np.ndarray, max_norm: float, eps: float = 1e-9) -> np
     return vec * (max_norm / (norm + eps))
 
 
+def _match_conditioned_focus_sharpen(
+    q_focus: np.ndarray, key_query_cos: float
+) -> np.ndarray:
+    """v15l-B: match-conditioned readout sharpening (query-step only).
+
+    When key/query alignment is positive, apply a small, bounded
+    power-sharpening of ``q_focus`` so that the downstream selective,
+    contrast and value-contrast readouts project ``read_t`` onto a
+    narrower set of slots. Strict no-op when ``key_query_cos <= 0``.
+    The exponent offset is capped at ~0.29 so an already-peaked
+    distribution cannot collapse to a Dirac spike, and a uniform
+    distribution is left effectively unchanged.
+    """
+    match_signal = max(0.0, float(key_query_cos))
+    sharpen_gate = math.tanh(2.0 * match_signal)
+    sharpen_exponent_delta = 0.3 * sharpen_gate
+    if sharpen_exponent_delta <= 1e-6:
+        return q_focus
+    q_focus_powered = np.power(
+        np.maximum(q_focus, 1e-9), 1.0 + sharpen_exponent_delta
+    )
+    return _positive_sum_normalize(q_focus_powered)
+
+
 @dataclass(frozen=True)
 class NodeExecutionState:
     memory: float
@@ -1661,6 +1685,12 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             )
                         )
                         q_focus = _positive_sum_normalize(np.maximum(q_focus, 1e-6))
+                        # v15l-B: match-conditioned extra power-sharpen of
+                        # q_focus when key/query alignment is positive. No-op
+                        # when key_query_cos <= 0; bounded exponent <= 1.29.
+                        q_focus = _match_conditioned_focus_sharpen(
+                            q_focus, key_query_cos
+                        )
                     read_mean = float(np.mean(read_t))
                     read_abs_mean = float(np.mean(np.abs(read_t)))
                     selective_readout = float(np.dot(read_t, q_focus))
