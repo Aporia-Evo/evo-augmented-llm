@@ -112,6 +112,34 @@ def _clip_vector_norm(vec: np.ndarray, max_norm: float, eps: float = 1e-9) -> np
     return vec * (max_norm / (norm + eps))
 
 
+_V15M_VALUE_DECODER_LEVELS = np.array([-1.0, 1.0], dtype=np.float64)
+_V15M_VALUE_DECODER_TEMPERATURE = 2.5
+
+
+def _value_level_logit_decode(
+    pre_decode: float,
+    value_levels: np.ndarray = _V15M_VALUE_DECODER_LEVELS,
+    temperature: float = _V15M_VALUE_DECODER_TEMPERATURE,
+) -> float:
+    """v15m: Bounded value-level logit decoder (query-step only).
+
+    Converts a scalar ``pre_decode`` (already tanh-bounded in [-1, 1])
+    into a softmax-weighted average over discrete value levels using
+    negative-distance logits. The lever replaces the single fragile
+    scalar decode with an explicit score over value levels, while
+    keeping the output shape unchanged. For the default binary levels
+    ``[-1, 1]`` the transform is equivalent to ``tanh(T * pre_decode)``
+    which sharpens weak signals without introducing hard thresholds.
+    """
+    levels = np.asarray(value_levels, dtype=np.float64)
+    distances = np.abs(float(pre_decode) - levels)
+    logits = -float(temperature) * distances
+    logits = logits - float(np.max(logits))
+    weights = np.exp(logits)
+    weights = weights / (float(np.sum(weights)) + 1e-9)
+    return float(np.sum(weights * levels))
+
+
 def _match_conditioned_focus_sharpen(
     q_focus: np.ndarray, key_query_cos: float
 ) -> np.ndarray:
@@ -1763,7 +1791,16 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             * (0.9 + (0.25 * read_eligibility)),
                         ),
                     )
-                    next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
+                    # v15m: replace the fragile scalar decode with a bounded
+                    # value-level logit decoder at query time only. Non-query
+                    # steps keep the plain tanh output unchanged.
+                    raw_decode = math.tanh(summed_input + (read_gain * readout))
+                    if step_role == "query":
+                        next_outputs[node.node_id] = _value_level_logit_decode(
+                            raw_decode
+                        )
+                    else:
+                        next_outputs[node.node_id] = raw_decode
                     key_norm_vals.append(float(np.linalg.norm(k_t)))
                     query_norm_vals.append(float(np.linalg.norm(q_t)))
                     key_variance_vals.append(key_variance)

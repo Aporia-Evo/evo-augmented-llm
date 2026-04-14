@@ -17,6 +17,7 @@ from evolve.custom_neuron import (
     _match_conditioned_focus_sharpen,
     _positive_sum_normalize,
     _product_key_focus,
+    _value_level_logit_decode,
     clamp_alpha,
     clamp_delta_weight,
     update_adaptive_delta_weight,
@@ -150,6 +151,46 @@ def test_match_conditioned_focus_sharpen_leaves_uniform_distribution_unchanged()
     uniform = np.full(8, 1.0 / 8.0, dtype=np.float64)
     sharpened = _match_conditioned_focus_sharpen(uniform, 1.0)
     assert np.allclose(sharpened, uniform)
+
+
+def test_value_level_decode_is_symmetric_around_zero() -> None:
+    # v15m: the decoder must be antisymmetric under sign flip of the
+    # pre-decode scalar (default levels [-1, +1] are symmetric around 0).
+    for x in (-0.9, -0.4, 0.0, 0.3, 0.7):
+        assert np.isclose(
+            _value_level_logit_decode(x) + _value_level_logit_decode(-x),
+            0.0,
+            atol=1e-12,
+        )
+
+
+def test_value_level_decode_stays_bounded_inside_level_hull() -> None:
+    # v15m: softmax-weighted average over levels must stay inside the
+    # convex hull of the levels, regardless of the pre-decode scalar.
+    for x in (-5.0, -1.0, -0.5, 0.0, 0.5, 1.0, 5.0):
+        decoded = _value_level_logit_decode(x)
+        assert -1.0 <= decoded <= 1.0
+
+
+def test_value_level_decode_sharpens_weak_signals() -> None:
+    # v15m: a weak positive pre-decode (e.g. 0.3) must map to a strictly
+    # larger positive output so the decoder exerts real sharpening; the
+    # default temperature 2.5 is the intervention.
+    assert _value_level_logit_decode(0.3) > 0.3
+    assert _value_level_logit_decode(-0.3) < -0.3
+    # At the origin the decoder must be a fixed point (no drift).
+    assert np.isclose(_value_level_logit_decode(0.0), 0.0, atol=1e-12)
+
+
+def test_value_level_decode_supports_custom_level_sets() -> None:
+    # v15m: custom value_levels must work and the weighted average must
+    # stay inside the level hull for non-binary sets too.
+    levels = np.array([-1.0, -0.5, 0.0, 0.5, 1.0], dtype=np.float64)
+    decoded = _value_level_logit_decode(0.4, value_levels=levels)
+    assert -1.0 <= decoded <= 1.0
+    # Closer to 0.5 than to 0 when pre_decode is 0.4, so output should
+    # sit between 0.0 and 0.5 rather than jumping to the extreme.
+    assert 0.0 < decoded < 0.6
 
 
 def test_plastic_executor_matches_stateful_when_eta_is_zero() -> None:
