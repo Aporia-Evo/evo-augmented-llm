@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from evolve.custom_neuron import (
     AdaptivePlasticNetworkExecutor,
@@ -13,6 +14,8 @@ from evolve.custom_neuron import (
     StatefulV6DeltaMemoryNetworkExecutor,
     StatefulV4SlotsNetworkExecutor,
     StatefulV2NetworkExecutor,
+    _positive_sum_normalize,
+    _product_key_focus,
     clamp_alpha,
     clamp_delta_weight,
     update_adaptive_delta_weight,
@@ -36,6 +39,80 @@ def test_delta_weight_is_clamped_symmetrically() -> None:
     assert clamp_delta_weight(-2.5, 1.0) == -1.0
     assert clamp_delta_weight(0.4, 1.0) == 0.4
     assert clamp_delta_weight(2.5, 1.0) == 1.0
+
+
+def test_product_key_focus_outputs_positive_distribution() -> None:
+    vec = np.array([0.2, 0.4, 0.1, 0.3, 0.5, 0.1, 0.2, 0.2], dtype=np.float64)
+
+    focus = _product_key_focus(vec)
+
+    assert focus.shape == vec.shape
+    assert np.all(focus >= 0.0)
+    assert float(np.sum(focus)) == pytest.approx(1.0, abs=1e-5)
+
+
+def test_product_key_focus_is_not_equivalent_to_plain_sum_normalize() -> None:
+    # A vector where the two halves carry very different total mass. The
+    # product-key cross-coupling must produce a distinctly different
+    # distribution from the plain positive sum normalization — otherwise the
+    # operator has collapsed into a no-op (the V15j regression we are
+    # guarding against).
+    vec = np.array([0.9, 0.8, 0.7, 0.6, 0.05, 0.05, 0.05, 0.05], dtype=np.float64)
+
+    plain = _positive_sum_normalize(vec)
+    pk = _product_key_focus(vec)
+
+    assert not np.allclose(plain, pk, atol=1e-4)
+
+
+def test_product_key_focus_is_not_equivalent_to_per_half_normalize_with_equal_mass() -> None:
+    # The V15j formulation reduced to "normalize each half independently then
+    # give each half 0.5 mass". Ensure _product_key_focus is *not* equivalent
+    # to that degenerate operation when the two halves carry unequal mass.
+    vec = np.array([0.9, 0.8, 0.7, 0.6, 0.05, 0.05, 0.05, 0.05], dtype=np.float64)
+
+    half_a = _positive_sum_normalize(vec[:4]) * 0.5
+    half_b = _positive_sum_normalize(vec[4:]) * 0.5
+    degenerate = np.concatenate((half_a, half_b))
+
+    pk = _product_key_focus(vec)
+
+    assert not np.allclose(degenerate, pk, atol=1e-4)
+
+
+def test_product_key_focus_couples_mass_between_halves() -> None:
+    # The product-key cross-coupling scales each half by the *opposite*
+    # half's raw mean. That means a half with large raw mean shrinks its
+    # counterpart's multiplier on its own side (it scales the opposite half
+    # by a large factor and itself by a small one). The net effect is a
+    # symmetry-breaking penalty against per-half imbalance: the half that
+    # started dominant in raw mass ends up contributing *less* total mass
+    # after renormalization, while the subordinate half gets boosted.
+    vec = np.array([0.9, 0.8, 0.7, 0.6, 0.05, 0.05, 0.05, 0.05], dtype=np.float64)
+
+    pk = _product_key_focus(vec)
+
+    # raw mean_a = 0.75, raw mean_b = 0.05. After cross-coupling the
+    # originally-heavy first half must now carry *less* than half the mass.
+    assert float(np.sum(pk[:4])) < 0.5
+    assert float(np.sum(pk[4:])) > 0.5
+    # But the operation is symmetric: swap halves and the relation flips.
+    vec_swapped = np.array(
+        [0.05, 0.05, 0.05, 0.05, 0.9, 0.8, 0.7, 0.6], dtype=np.float64
+    )
+    pk_swapped = _product_key_focus(vec_swapped)
+    assert float(np.sum(pk_swapped[:4])) > 0.5
+    assert float(np.sum(pk_swapped[4:])) < 0.5
+
+
+def test_product_key_focus_degrades_gracefully_for_tiny_vectors() -> None:
+    single = np.array([0.4], dtype=np.float64)
+    assert np.allclose(_product_key_focus(single), _positive_sum_normalize(single))
+
+    empty_half = np.array([0.2, 0.3, 0.4, 0.0, 0.0, 0.0], dtype=np.float64)
+    focus = _product_key_focus(empty_half)
+    # Second half has zero mass -> fall back to plain positive sum normalize.
+    assert np.allclose(focus, _positive_sum_normalize(empty_half))
 
 
 def test_plastic_executor_matches_stateful_when_eta_is_zero() -> None:

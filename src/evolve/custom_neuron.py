@@ -59,6 +59,52 @@ def _positive_sum_normalize(vec: np.ndarray, eps: float = 1e-6) -> np.ndarray:
     return clipped / (float(np.sum(clipped)) + eps)
 
 
+def _product_key_focus(vec: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+    """Apply a product-key style cross-coupling between the two halves of an
+    address-focus vector.
+
+    The input is treated as a positive vector of even length ``d``; it is split
+    into two halves ``a`` and ``b`` of length ``d/2``. Each half's *raw*
+    (pre-normalization) mean is used as the cross-coupling scalar for the
+    opposite half. Each half is then sum-normalized independently, scaled by
+    the opposite raw mean, concatenated, and re-normalized to a positive
+    distribution.
+
+    The key property of this formulation is that the cross-coupling scalars
+    (``mean(raw_a)``, ``mean(raw_b)``) are computed **before** the per-half
+    sum normalization. Using them after sum normalization would reduce both
+    means to identical constants (``1/(d/2)``) and collapse the product-key
+    interaction to a trivial half-mass rebalancing. Here, a half that carries
+    more total positive mass in the raw input multiplicatively boosts the
+    *other* half's contribution after concatenation, so both halves must
+    carry meaningful positive mass for either to survive re-normalization.
+
+    For vectors of size < 2 or where either half has all non-positive
+    entries, this degrades gracefully to a plain positive sum normalization.
+    """
+
+    if vec.size < 2:
+        return _positive_sum_normalize(vec, eps=eps)
+    split = vec.size // 2
+    if split == 0 or split == vec.size:
+        return _positive_sum_normalize(vec, eps=eps)
+    raw_a = np.maximum(vec[:split], 0.0)
+    raw_b = np.maximum(vec[split:], 0.0)
+    sum_a = float(np.sum(raw_a))
+    sum_b = float(np.sum(raw_b))
+    if sum_a <= eps or sum_b <= eps:
+        return _positive_sum_normalize(vec, eps=eps)
+    mean_a = sum_a / float(split)
+    mean_b = sum_b / float(vec.size - split)
+    first_half = raw_a / (sum_a + eps)
+    second_half = raw_b / (sum_b + eps)
+    first_scaled = first_half * (mean_b + eps)
+    second_scaled = second_half * (mean_a + eps)
+    return _positive_sum_normalize(
+        np.concatenate((first_scaled, second_scaled)), eps=eps
+    )
+
+
 def _clip_vector_norm(vec: np.ndarray, max_norm: float, eps: float = 1e-9) -> np.ndarray:
     norm = float(np.linalg.norm(vec))
     if norm <= max_norm:
@@ -1192,8 +1238,15 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     )
                     k_raw = np.maximum(k_raw, 1e-3)
                     q_raw = np.maximum(q_raw, 1e-3)
-                    k_t_base = _positive_sum_normalize(k_raw)
-                    q_t_base = _positive_sum_normalize(q_raw)
+                    # V15k product-key addressing: split the raw k/q vectors
+                    # into two halves and cross-couple via the opposite-half
+                    # raw mean. See ``_product_key_focus`` for the formulation.
+                    # This is the only address-structure lever introduced by
+                    # v15k; the rest of the delta-memory mechanism (beta_t,
+                    # memory decay, v_hat_t, delta_t, outer-product update,
+                    # clipping, write-path signals) is unchanged.
+                    k_t_base = _product_key_focus(k_raw)
+                    q_t_base = _product_key_focus(q_raw)
                     key_variance_pre = float(np.var(k_t_base))
                     query_variance_pre = float(np.var(q_t_base))
                     key_query_asym = abs(key_seed) / (abs(key_seed) + abs(query_seed) + 1e-6)
