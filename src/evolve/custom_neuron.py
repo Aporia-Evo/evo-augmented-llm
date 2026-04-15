@@ -921,10 +921,15 @@ class StatefulV4SlotsNetworkExecutor(StatefulNetworkExecutor):
                         )
                     query_key = query_signal * (0.5 + abs(input_norm))
                     match_scale = max(0.5, float(node.content_temperature))
-                    match_bias = float(node.content_b_match)
+                    # NOTE: ``content_b_match`` was previously added as a per-logit
+                    # constant here, but a constant offset on every logit cancels
+                    # exactly against the subsequent ``logits - max(logits)``
+                    # normalisation step and therefore had zero effect on
+                    # ``weights``. Removed to stop evolution from spending search
+                    # budget on a phantom parameter in this code path.
                     logits = np.asarray(
                         [
-                            (match_scale * query_key * slot_keys[node.node_id][slot_idx]) + match_bias
+                            match_scale * query_key * slot_keys[node.node_id][slot_idx]
                             for slot_idx in range(slot_count)
                         ],
                         dtype=np.float64,
