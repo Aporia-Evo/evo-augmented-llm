@@ -640,17 +640,20 @@ def _v6_delta_memory_genome(*, alpha_slow: float) -> GenomeModel:
 
 
 def test_v6_delta_memory_alpha_slow_controls_retention() -> None:
-    # v15n-A: node.alpha_slow is the per-neuron memory_decay knob for the
-    # V6 delta-memory executor. Verify that two genomes which are identical
-    # except for ``alpha_slow`` diverge in memory-retention diagnostics over
-    # a long distractor delay, with the low-``alpha_slow`` genome forgetting
-    # more aggressively than the high-``alpha_slow`` genome.
+    # v15n-B: node.alpha_slow is the per-neuron memory_decay knob for the
+    # V6 delta-memory executor, mapped to [0.97, 0.99] — i.e. floored at
+    # the historical hardcoded baseline so evolution can only lengthen
+    # retention, never shorten it. Verify that two genomes which are
+    # identical except for ``alpha_slow`` diverge in memory-retention
+    # diagnostics over a long distractor delay, with alpha_slow=1.0 (max
+    # retention, decay=0.99) carrying strictly more residual memory than
+    # alpha_slow=0.0 (baseline, decay=0.97).
     executor = StatefulV6DeltaMemoryNetworkExecutor(activation_steps=1)
 
     # One store step, a long sequence of distractor steps to exercise
-    # memory decay, then a query. Low alpha_slow => fast decay => the
-    # Frobenius norm of the write at query time should be clearly smaller
-    # than with high alpha_slow.
+    # memory decay, then a query. Low alpha_slow => baseline decay 0.97;
+    # high alpha_slow => extended decay 0.99. After 10 distractor steps
+    # the Frobenius norm difference must be observable.
     sequence = (
         [[1.0, 0.0, 0.0]]
         + [[0.2, 0.8, 0.0]] * 10
@@ -658,28 +661,27 @@ def test_v6_delta_memory_alpha_slow_controls_retention() -> None:
     )
     roles = ["store"] + (["distractor"] * 10) + ["query"]
 
-    genome_short = _v6_delta_memory_genome(alpha_slow=0.0)   # decay = 0.90
-    genome_long = _v6_delta_memory_genome(alpha_slow=1.0)    # decay = 0.99
+    genome_baseline = _v6_delta_memory_genome(alpha_slow=0.0)  # decay = 0.97
+    genome_long = _v6_delta_memory_genome(alpha_slow=1.0)      # decay = 0.99
 
-    executor.run_sequence(genome_short, sequence, step_roles=roles)
-    metrics_short = executor.last_episode_metrics()
+    executor.run_sequence(genome_baseline, sequence, step_roles=roles)
+    metrics_baseline = executor.last_episode_metrics()
     executor.run_sequence(genome_long, sequence, step_roles=roles)
     metrics_long = executor.last_episode_metrics()
 
     # High-retention genome must carry a strictly larger residual memory
-    # mass at query time than the aggressively-decaying one.
+    # mass at query time than the baseline-floored one.
     assert (
         metrics_long.mean_memory_frobenius_norm
-        > metrics_short.mean_memory_frobenius_norm + 1e-3
+        > metrics_baseline.mean_memory_frobenius_norm + 1e-3
     )
-    # Baseline sanity: the hardcoded-0.97 behaviour is approximated by
-    # alpha_slow ~ 0.778.  A genome at alpha_slow = 0.778 should sit
-    # between the two extremes on the same metric.
-    genome_mid = _v6_delta_memory_genome(alpha_slow=0.778)
+    # Monotonicity sanity: a mid-range alpha_slow should sit strictly
+    # between the two endpoints on the same metric.
+    genome_mid = _v6_delta_memory_genome(alpha_slow=0.5)
     executor.run_sequence(genome_mid, sequence, step_roles=roles)
     metrics_mid = executor.last_episode_metrics()
     assert (
-        metrics_short.mean_memory_frobenius_norm
+        metrics_baseline.mean_memory_frobenius_norm
         < metrics_mid.mean_memory_frobenius_norm
         < metrics_long.mean_memory_frobenius_norm
     )

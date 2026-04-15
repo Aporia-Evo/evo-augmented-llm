@@ -1184,16 +1184,17 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         incoming_by_target = _incoming_connections_by_target(genome)
         d_key = 8
         d_value = 8
-        # v15n-A: per-neuron evolvable retention. memory_decay is now derived
-        # per-node from ``node.alpha_slow`` (a phantom parameter on the V6
-        # delta-memory path until now) via
-        #     memory_decay = 0.90 + 0.09 * clip(alpha_slow, 0, 1)
-        # so alpha_slow=0 -> 0.90 (short retention), alpha_slow=1 -> 0.99
-        # (long retention). The previous hardcoded 0.97 corresponds to
-        # alpha_slow ~ 0.778, which sits inside the alpha_slow init
-        # distribution (mean 0.85, std 0.08) so generation-0 behaviour is
-        # approximately unchanged and evolution is free to push retention
-        # longer or shorter per-neuron. See derivation below.
+        # v15n-B: per-neuron evolvable retention, floored at the historical
+        # baseline. ``memory_decay`` is derived per-node from
+        # ``node.alpha_slow`` (a phantom parameter on the V6 delta-memory
+        # path until v15n-A) via
+        #     memory_decay = 0.97 + 0.02 * clip(alpha_slow, 0, 1)
+        # so alpha_slow=0 -> 0.97 (the prior hardcoded value) and
+        # alpha_slow=1 -> 0.99 (longer retention). v15n-A mapped to
+        # [0.90, 0.99] but evolution drifted ``alpha_slow`` downward,
+        # shortening retention and losing fitness. v15n-B removes that
+        # regressive local optimum: evolution can only *lengthen*
+        # retention relative to baseline, never shorten it.
         delta_clip_norm = 2.0
         update_clip_frob = 1.0
         read_clip_norm = 2.0
@@ -1515,7 +1516,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         dtype=np.float64,
                     )
                     state = memory_state[node.node_id]
-                    memory_decay = 0.90 + 0.09 * float(
+                    memory_decay = 0.97 + 0.02 * float(
                         np.clip(node.alpha_slow, 0.0, 1.0)
                     )
                     decayed_state = memory_decay * state
