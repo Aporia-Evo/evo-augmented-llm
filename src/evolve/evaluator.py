@@ -1195,6 +1195,12 @@ def _aggregate_episode_metrics(metrics: Sequence[PlasticityEpisodeMetrics]) -> P
 
 def _nearest_value_indices(predictions: np.ndarray, *, value_levels: np.ndarray) -> np.ndarray:
     distances = np.abs(predictions[:, None] - value_levels[None, :])
+    # DIAGNOSTIC (tie-break randomization): break exact-distance ties uniformly at
+    # random instead of deterministic argmin-on-lowest-index. Jitter scale 1e-9 is
+    # far below any legitimate distance gap for the KV-Easy levels (>= 0.25) so it
+    # only affects true ties.
+    jitter = np.random.uniform(0.0, 1e-9, distances.shape)
+    distances = distances + jitter
     return np.argmin(distances, axis=1).astype(np.int32)
 
 
