@@ -1184,7 +1184,16 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         incoming_by_target = _incoming_connections_by_target(genome)
         d_key = 8
         d_value = 8
-        memory_decay = 0.97
+        # v15n-A: per-neuron evolvable retention. memory_decay is now derived
+        # per-node from ``node.alpha_slow`` (a phantom parameter on the V6
+        # delta-memory path until now) via
+        #     memory_decay = 0.90 + 0.09 * clip(alpha_slow, 0, 1)
+        # so alpha_slow=0 -> 0.90 (short retention), alpha_slow=1 -> 0.99
+        # (long retention). The previous hardcoded 0.97 corresponds to
+        # alpha_slow ~ 0.778, which sits inside the alpha_slow init
+        # distribution (mean 0.85, std 0.08) so generation-0 behaviour is
+        # approximately unchanged and evolution is free to push retention
+        # longer or shorter per-neuron. See derivation below.
         delta_clip_norm = 2.0
         update_clip_frob = 1.0
         read_clip_norm = 2.0
@@ -1506,6 +1515,9 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         dtype=np.float64,
                     )
                     state = memory_state[node.node_id]
+                    memory_decay = 0.90 + 0.09 * float(
+                        np.clip(node.alpha_slow, 0.0, 1.0)
+                    )
                     decayed_state = memory_decay * state
                     v_hat_t = decayed_state @ k_t
                     delta_base = v_base - v_hat_t
