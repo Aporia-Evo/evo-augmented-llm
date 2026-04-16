@@ -454,6 +454,61 @@ def test_stateful_v6_delta_memory_updates_state_and_reports_metrics() -> None:
     )
 
 
+def test_stateful_v6_query_value_competition_uses_active_value_levels_only_when_provided() -> None:
+    genome = GenomeModel(
+        input_ids=(0, 1, 2),
+        output_ids=(3,),
+        nodes=(
+            NodeGeneModel(node_id=0, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(node_id=1, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(node_id=2, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(
+                node_id=3,
+                bias=0.0,
+                alpha=0.6,
+                content_w_key=0.9,
+                content_b_key=0.2,
+                content_w_query=1.1,
+                content_b_query=0.1,
+                content_temperature=1.2,
+                content_b_match=0.3,
+                is_output=True,
+            ),
+        ),
+        connections=(
+            ConnectionGeneModel(in_id=0, out_id=3, historical_marker=0, weight=1.0, enabled=True, eta=0.0),
+            ConnectionGeneModel(in_id=1, out_id=3, historical_marker=1, weight=0.5, enabled=True, eta=0.0),
+            ConnectionGeneModel(in_id=2, out_id=3, historical_marker=2, weight=-0.25, enabled=True, eta=0.0),
+        ),
+    )
+    sequence = [[1.0, 0.0, 0.0], [0.2, 0.8, 0.0], [0.0, 1.0, 0.0]]
+    roles = ["store", "distractor", "query"]
+    executor = StatefulV6DeltaMemoryNetworkExecutor(activation_steps=1)
+
+    baseline = executor.run_sequence(genome, sequence, step_roles=roles)
+    fallback = executor.run_sequence(
+        genome,
+        sequence,
+        step_roles=roles,
+        active_value_levels=[],
+    )
+    with_levels_a = executor.run_sequence(
+        genome,
+        sequence,
+        step_roles=roles,
+        active_value_levels=[-0.9, -0.2, 0.2, 0.9],
+    )
+    with_levels_b = executor.run_sequence(
+        genome,
+        sequence,
+        step_roles=roles,
+        active_value_levels=[-0.5, 0.0, 0.5],
+    )
+
+    assert np.allclose(baseline, fallback)
+    assert not np.allclose(with_levels_a, with_levels_b)
+
+
 def _single_connection_genome(
     weight: float,
     eta: float,

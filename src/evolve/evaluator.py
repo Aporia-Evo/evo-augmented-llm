@@ -524,6 +524,7 @@ class KeyValueMemoryEvaluator:
             samples=task.input_sequences,
             sequence_mode=True,
             step_roles_by_sample=task.step_roles,
+            active_value_levels=task.value_levels,
         )
         predictions = _bounded_predictions(raw_outputs)
         final_predictions = predictions[:, -1:, :]
@@ -1073,6 +1074,7 @@ def _run_samples(
     samples: Sequence[Sequence[float] | Sequence[Sequence[float]]],
     sequence_mode: bool,
     step_roles_by_sample: Sequence[Sequence[str]] | None = None,
+    active_value_levels: Sequence[float] | None = None,
 ) -> tuple[np.ndarray, PlasticityEpisodeMetrics | None]:
     outputs: list[np.ndarray] = []
     metrics: list[PlasticityEpisodeMetrics] = []
@@ -1081,10 +1083,12 @@ def _run_samples(
             roles = None
             if step_roles_by_sample is not None and sample_index < len(step_roles_by_sample):
                 roles = step_roles_by_sample[sample_index]
-            if roles is None:
-                raw_output = executor.run_sequence(genome, sample)  # type: ignore[arg-type]
-            else:
-                raw_output = executor.run_sequence(genome, sample, step_roles=roles)  # type: ignore[arg-type]
+            run_kwargs: dict[str, object] = {}
+            if roles is not None:
+                run_kwargs["step_roles"] = roles
+            if active_value_levels is not None and isinstance(executor, StatefulV6DeltaMemoryNetworkExecutor):
+                run_kwargs["active_value_levels"] = active_value_levels
+            raw_output = executor.run_sequence(genome, sample, **run_kwargs)  # type: ignore[arg-type]
         else:
             raw_output = executor.run(genome, sample)  # type: ignore[arg-type]
         outputs.append(raw_output)
