@@ -4,6 +4,15 @@
 - seeds: 7, 11, 13, 17, 23
 - curriculum: 8->8@g6
 
+## Run Results
+
+| seed | run_id | status | success | final_max_score | first_success_generation |
+| --- | --- | --- | --- | --- | --- |
+| 7 | v15q-delta-7-20260416T174104.234280+0000 | finished | False | 5.251373 | n/a |
+| 11 | v15q-delta-11-20260416T174835.639237+0000 | finished | False | 6.221132 | n/a |
+| 13 | v15q-delta-13-20260416T175642.489514+0000 | finished | False | 5.243201 | n/a |
+| 17 | v15q-delta-17-20260416T180352.736920+0000 | finished | False | 5.242993 | n/a |
+| 23 | v15q-delta-23-20260416T181120.134513+0000 | finished | False | 6.236097 | n/a |
 
 | task | delay | variant | runs | success_rate | mean_final_max_score | mean_first_success_generation | median_first_success_generation | mean_best_nodes | mean_best_enabled_conns |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

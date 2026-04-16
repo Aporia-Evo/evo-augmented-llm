@@ -4,6 +4,11 @@
 - seeds: 7
 - curriculum: 8->8@g6
 
+## Run Results
+
+| seed | run_id | status | success | final_max_score | first_success_generation |
+| --- | --- | --- | --- | --- | --- |
+| 7 | v15q-delta-7-20260416T173332.965089+0000 | finished | False | 5.251373 | n/a |
 
 | task | delay | variant | runs | success_rate | mean_final_max_score | mean_first_success_generation | median_first_success_generation | mean_best_nodes | mean_best_enabled_conns |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
