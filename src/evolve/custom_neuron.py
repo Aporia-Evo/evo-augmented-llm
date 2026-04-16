@@ -1054,8 +1054,14 @@ class StatefulV5AddressedSlotsNetworkExecutor(StatefulNetworkExecutor):
 
 
 class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
-    def __init__(self, activation_steps: int) -> None:
+    def __init__(
+        self,
+        activation_steps: int,
+        *,
+        sub_variant: str = "stateful_v6_delta_memory",
+    ) -> None:
         super().__init__(activation_steps=activation_steps)
+        self._sub_variant = sub_variant
         self._last_metrics = PlasticityEpisodeMetrics(
             plasticity_enabled=False,
             mean_abs_delta_w=0.0,
@@ -1145,8 +1151,18 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     x_t = summed_input + node.bias
                     x_norm = x_t / (1.0 + abs(x_t))
                     x_abs = abs(x_norm)
-                    key_seed = (node.content_w_key * x_norm) + (node.content_b_key * x_abs)
-                    query_seed = (node.content_w_query * x_norm) + (node.content_b_query * x_abs)
+                    if self._sub_variant == "stateful_v6_delta_memory_v16a":
+                        # v16a: disjoint source signals. Key lives on the
+                        # signed axis (x_norm), query on the unsigned axis
+                        # (x_abs). Evolution no longer has to discover the
+                        # decoupling — it is structurally enforced.
+                        key_seed = (node.content_w_key * x_norm) + (0.25 * node.content_b_key)
+                        query_seed = (node.content_w_query * x_abs) + (
+                            0.25 * node.content_b_query * (1.0 - x_abs)
+                        )
+                    else:
+                        key_seed = (node.content_w_key * x_norm) + (node.content_b_key * x_abs)
+                        query_seed = (node.content_w_query * x_norm) + (node.content_b_query * x_abs)
                     value_seed = summed_input + node.slow_output_gain
                     beta_logit = (node.content_temperature * x_norm) + node.content_b_match
                     beta_base = 1.0 / (1.0 + math.exp(-beta_logit))
@@ -1168,33 +1184,65 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             )
                         )
                     )
-                    key_core = (
-                        key_seed * (0.95 + (0.65 * center_peak))
-                        + (0.6 * node.content_b_key * position_axis)
-                        + (0.35 * node.content_w_key * alt_sign)
-                        + (0.2 * key_seed * harmonic_cos)
-                    )
-                    key_cross = 0.18 * query_seed * (0.6 * position_axis + 0.4 * alt_sign)
-                    k_raw = (
-                        1.0
-                        + (0.5 * np.tanh(key_core))
-                        + (0.3 * np.tanh((key_core * alt_sign) + key_cross))
-                        + (0.22 * np.tanh((key_seed - query_seed) * (center_peak - edge_peak)))
-                        + (0.12 * np.tanh((key_seed + node.content_b_key) * harmonic_cos))
-                    )
-                    query_core = (
-                        query_seed * (0.95 + (0.7 * edge_peak))
-                        - (0.55 * node.content_b_query * position_axis)
-                        + (0.4 * node.content_w_query * centered_square)
-                        + (0.25 * query_seed * harmonic_sin)
-                    )
-                    q_raw = (
-                        1.0
-                        + (0.52 * np.tanh(query_core + (0.25 * alt_sign)))
-                        + (0.34 * np.tanh((query_seed - key_seed) * ((1.1 * edge_peak) + (0.4 * alt_sign))))
-                        + (0.24 * np.tanh((query_core * position_axis) - (0.25 * key_seed * harmonic_cos)))
-                        + (0.14 * np.tanh((query_seed + node.content_b_query) * harmonic_sin))
-                    )
+                    if self._sub_variant == "stateful_v6_delta_memory_v16a":
+                        # v16a: disjoint positional bases. Key uses the
+                        # low-frequency / signed set {center_peak,
+                        # position_axis, harmonic_cos}; query uses the
+                        # high-frequency / unsigned / phase-shifted set
+                        # {edge_peak, alt_sign, centered_square, harmonic_sin}.
+                        # No cross-pollution: key_core does not reference
+                        # query_seed and vice versa.
+                        key_core = (
+                            key_seed * (0.95 + (0.65 * center_peak))
+                            + (0.6 * node.content_b_key * position_axis)
+                            + (0.35 * node.content_w_key * harmonic_cos)
+                        )
+                        k_raw = (
+                            1.0
+                            + (0.55 * np.tanh(key_core))
+                            + (0.28 * np.tanh(key_core * center_peak))
+                            + (0.15 * np.tanh((key_seed + node.content_b_key) * harmonic_cos))
+                        )
+                        query_core = (
+                            query_seed * (0.95 + (0.70 * edge_peak))
+                            - (0.55 * node.content_b_query * alt_sign)
+                            + (0.40 * node.content_w_query * centered_square)
+                            + (0.25 * query_seed * harmonic_sin)
+                        )
+                        q_raw = (
+                            1.0
+                            + (0.55 * np.tanh(query_core))
+                            + (0.30 * np.tanh(query_core * edge_peak))
+                            + (0.15 * np.tanh((query_seed + node.content_b_query) * harmonic_sin))
+                        )
+                    else:
+                        key_core = (
+                            key_seed * (0.95 + (0.65 * center_peak))
+                            + (0.6 * node.content_b_key * position_axis)
+                            + (0.35 * node.content_w_key * alt_sign)
+                            + (0.2 * key_seed * harmonic_cos)
+                        )
+                        key_cross = 0.18 * query_seed * (0.6 * position_axis + 0.4 * alt_sign)
+                        k_raw = (
+                            1.0
+                            + (0.5 * np.tanh(key_core))
+                            + (0.3 * np.tanh((key_core * alt_sign) + key_cross))
+                            + (0.22 * np.tanh((key_seed - query_seed) * (center_peak - edge_peak)))
+                            + (0.12 * np.tanh((key_seed + node.content_b_key) * harmonic_cos))
+                        )
+                        query_core = (
+                            query_seed * (0.95 + (0.7 * edge_peak))
+                            - (0.55 * node.content_b_query * position_axis)
+                            + (0.4 * node.content_w_query * centered_square)
+                            + (0.25 * query_seed * harmonic_sin)
+                        )
+                        q_raw = (
+                            1.0
+                            + (0.52 * np.tanh(query_core + (0.25 * alt_sign)))
+                            + (0.34 * np.tanh((query_seed - key_seed) * ((1.1 * edge_peak) + (0.4 * alt_sign))))
+                            + (0.24 * np.tanh((query_core * position_axis) - (0.25 * key_seed * harmonic_cos)))
+                            + (0.14 * np.tanh((query_seed + node.content_b_query) * harmonic_sin))
+                        )
                     k_raw = np.maximum(k_raw, 1e-3)
                     q_raw = np.maximum(q_raw, 1e-3)
                     k_t_base = _positive_sum_normalize(k_raw)
