@@ -92,6 +92,7 @@ VARIANT_CHOICES = [
     "stateful_v4_slots",
     "stateful_v5_addressed_slots",
     "stateful_v6_delta_memory",
+    "stateful_v6_delta_memory_v16a",
     "content_gated",
     "stateless",
     "stateful_plastic",

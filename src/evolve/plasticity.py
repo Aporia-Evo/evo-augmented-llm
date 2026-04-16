@@ -6,7 +6,10 @@ CONTENT_GATED_VARIANTS = frozenset({"content_gated"})
 STATEFUL_V3_KV_VARIANTS = frozenset({"stateful_v3_kv"})
 STATEFUL_V4_SLOTS_VARIANTS = frozenset({"stateful_v4_slots"})
 STATEFUL_V5_ADDRESSED_SLOTS_VARIANTS = frozenset({"stateful_v5_addressed_slots"})
-STATEFUL_V6_DELTA_MEMORY_VARIANTS = frozenset({"stateful_v6_delta_memory"})
+STATEFUL_V6_DELTA_MEMORY_VARIANTS = frozenset({
+    "stateful_v6_delta_memory",
+    "stateful_v6_delta_memory_v16a",
+})
 PLASTIC_HEBB_VARIANTS = frozenset({"stateful_plastic", "stateful_plastic_hebb"})
 PLASTIC_AD_FIXED_D_VARIANTS = {
     "stateful_plastic_ad_d0": 0.0,

@@ -857,7 +857,10 @@ def _build_executor(
     if is_stateful_v5_addressed_slots_variant(variant):
         return StatefulV5AddressedSlotsNetworkExecutor(activation_steps=activation_steps)
     if is_stateful_v6_delta_memory_variant(variant):
-        return StatefulV6DeltaMemoryNetworkExecutor(activation_steps=activation_steps)
+        return StatefulV6DeltaMemoryNetworkExecutor(
+            activation_steps=activation_steps,
+            sub_variant=variant,
+        )
     plastic_mode = plastic_mode_for_variant(variant)
     if plastic_mode == "hebb":
         return PlasticNetworkExecutor(
