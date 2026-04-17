@@ -9,6 +9,7 @@ STATEFUL_V5_ADDRESSED_SLOTS_VARIANTS = frozenset({"stateful_v5_addressed_slots"}
 STATEFUL_V6_DELTA_MEMORY_VARIANTS = frozenset({
     "stateful_v6_delta_memory",
     "stateful_v6_delta_memory_v16a",
+    "stateful_v6_delta_memory_v16b",
 })
 PLASTIC_HEBB_VARIANTS = frozenset({"stateful_plastic", "stateful_plastic_hebb"})
 PLASTIC_AD_FIXED_D_VARIANTS = {
