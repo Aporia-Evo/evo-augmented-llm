@@ -1062,6 +1062,14 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
     ) -> None:
         super().__init__(activation_steps=activation_steps)
         self._sub_variant = sub_variant
+        # v16a and v16b both use the architectural source asymmetry.
+        self._source_asymmetry = sub_variant in (
+            "stateful_v6_delta_memory_v16a",
+            "stateful_v6_delta_memory_v16b",
+        )
+        # v16b additionally zeroes the key<->query crossing gains so the
+        # post-hoc machinery cannot pull k_t and q_t back together.
+        self._cross_kq_enabled = sub_variant != "stateful_v6_delta_memory_v16b"
         self._last_metrics = PlasticityEpisodeMetrics(
             plasticity_enabled=False,
             mean_abs_delta_w=0.0,
@@ -1151,11 +1159,11 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     x_t = summed_input + node.bias
                     x_norm = x_t / (1.0 + abs(x_t))
                     x_abs = abs(x_norm)
-                    if self._sub_variant == "stateful_v6_delta_memory_v16a":
-                        # v16a: disjoint source signals. Key lives on the
-                        # signed axis (x_norm), query on the unsigned axis
-                        # (x_abs). Evolution no longer has to discover the
-                        # decoupling — it is structurally enforced.
+                    if self._source_asymmetry:
+                        # v16a/v16b: disjoint source signals. Key lives on
+                        # the signed axis (x_norm), query on the unsigned
+                        # axis (x_abs). Evolution no longer has to discover
+                        # the decoupling — it is structurally enforced.
                         key_seed = (node.content_w_key * x_norm) + (0.25 * node.content_b_key)
                         query_seed = (node.content_w_query * x_abs) + (
                             0.25 * node.content_b_query * (1.0 - x_abs)
@@ -1184,8 +1192,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             )
                         )
                     )
-                    if self._sub_variant == "stateful_v6_delta_memory_v16a":
-                        # v16a: disjoint positional bases. Key uses the
+                    if self._source_asymmetry:
+                        # v16a/v16b: disjoint positional bases. Key uses the
                         # low-frequency / signed set {center_peak,
                         # position_axis, harmonic_cos}; query uses the
                         # high-frequency / unsigned / phase-shifted set
@@ -1279,6 +1287,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         - 0.55
                     )
                     congruence_gain = 0.045 * (1.0 + math.tanh(congruence_logit))
+                    if not self._cross_kq_enabled:
+                        congruence_gain = 0.0
                     margin_logit = (
                         (1.0 * store_signal)
                         + (0.4 * key_query_asym)
@@ -1318,6 +1328,8 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         - 0.65
                     )
                     compat_refine_gain = 0.03 * (1.0 + math.tanh(compat_refine_logit))
+                    if not self._cross_kq_enabled:
+                        compat_refine_gain = 0.0
                     k_t = _positive_sum_normalize(
                         np.maximum(
                             k_t + (compat_refine_gain * query_compat_profile),
@@ -1379,6 +1391,9 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     q_orthogonal_term = 0.03 * deflation_gain * (
                         q_orthogonal_hint / (q_orthogonal_norm + 1e-9)
                     )
+                    if not self._cross_kq_enabled:
+                        deflation_vector = np.zeros_like(k_centered)
+                        q_orthogonal_term = np.zeros_like(k_centered)
                     edge_recentered = edge_peak - float(np.mean(edge_peak))
                     edge_gain = 0.02 * deflation_gain * query_collapse_signal_pre * query_signal
                     focus_logit = (
@@ -1400,7 +1415,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     )
                     q_t = _positive_sum_normalize(np.maximum(q_decoupled, 1e-6))
                     extra_deflation_vector = np.zeros_like(q_t)
-                    if step_role == "query":
+                    if step_role == "query" and self._cross_kq_enabled:
                         q_post_centered = q_t - float(np.mean(q_t))
                         post_projection_coeff = float(np.dot(q_post_centered, k_centered)) / key_center_energy
                         bounded_post_projection = 0.2 * math.tanh(post_projection_coeff / 0.2)
