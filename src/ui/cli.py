@@ -2613,6 +2613,7 @@ def _print_retrieval_trace_report(args: argparse.Namespace) -> int:
         delay_steps=args.delay,
         profile=args.profile,
         sample_index=args.sample_index,
+        variant=chosen.variant,
     )
     report_path = write_trace_report(
         result,

@@ -413,6 +413,7 @@ def run_retrieval_trace_sweep(
                 delay_steps=record.delay_steps,
                 profile=profile,
                 sample_index=sample_index,
+                variant=variant,
             )
             query_indices = [
                 idx for idx, role in enumerate(trace_result.step_roles) if role == "query"
