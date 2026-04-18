@@ -149,6 +149,7 @@ def run_retrieval_trace(
     profile: str = "kv_easy",
     activation_steps: int = 4,
     sample_index: int = 0,
+    variant: str = "stateful_v6_delta_memory",
 ) -> TraceResult:
     """Execute a single sample from a KV task and return trace diagnostics."""
     task = KeyValueMemoryTask.create(delay_steps=delay_steps, profile=profile)
@@ -158,6 +159,7 @@ def run_retrieval_trace(
 
     executor = StatefulV6DeltaMemoryNetworkExecutor(
         activation_steps=activation_steps,
+        sub_variant=variant,
     )
     sink: list[dict[str, object]] = []
     raw_output = executor.run_sequence(
