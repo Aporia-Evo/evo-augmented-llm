@@ -1062,14 +1062,20 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
     ) -> None:
         super().__init__(activation_steps=activation_steps)
         self._sub_variant = sub_variant
-        # v16a and v16b both use the architectural source asymmetry.
+        # v16a, v16b, and v16c all use the architectural source asymmetry.
         self._source_asymmetry = sub_variant in (
             "stateful_v6_delta_memory_v16a",
             "stateful_v6_delta_memory_v16b",
+            "stateful_v6_delta_memory_v16c",
         )
         # v16b additionally zeroes the key<->query crossing gains so the
         # post-hoc machinery cannot pull k_t and q_t back together.
         self._cross_kq_enabled = sub_variant != "stateful_v6_delta_memory_v16b"
+        # v16c reduces the constant baseline in k_raw/q_raw and amplifies
+        # the tanh perturbations so that k_t and q_t can leave the near-
+        # uniform simplex region (base/v16a/v16b key_variance ~0.001-0.004,
+        # which mathematically forces cosine near 1.0 no matter the genes).
+        self._amplified_magnitude = sub_variant == "stateful_v6_delta_memory_v16c"
         self._last_metrics = PlasticityEpisodeMetrics(
             plasticity_enabled=False,
             mean_abs_delta_w=0.0,
@@ -1205,24 +1211,42 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             + (0.6 * node.content_b_key * position_axis)
                             + (0.35 * node.content_w_key * harmonic_cos)
                         )
-                        k_raw = (
-                            1.0
-                            + (0.55 * np.tanh(key_core))
-                            + (0.28 * np.tanh(key_core * center_peak))
-                            + (0.15 * np.tanh((key_seed + node.content_b_key) * harmonic_cos))
-                        )
                         query_core = (
                             query_seed * (0.95 + (0.70 * edge_peak))
                             - (0.55 * node.content_b_query * alt_sign)
                             + (0.40 * node.content_w_query * centered_square)
                             + (0.25 * query_seed * harmonic_sin)
                         )
-                        q_raw = (
-                            1.0
-                            + (0.55 * np.tanh(query_core))
-                            + (0.30 * np.tanh(query_core * edge_peak))
-                            + (0.15 * np.tanh((query_seed + node.content_b_query) * harmonic_sin))
-                        )
+                        if self._amplified_magnitude:
+                            # v16c: shrink the constant baseline and double
+                            # the tanh amplitudes so perturbations dominate
+                            # over the uniform-1/d pull of _positive_sum_normalize.
+                            # Ratio perturbation/baseline: ~1:1 -> ~13:1.
+                            k_raw = (
+                                0.15
+                                + (1.10 * np.tanh(key_core))
+                                + (0.56 * np.tanh(key_core * center_peak))
+                                + (0.30 * np.tanh((key_seed + node.content_b_key) * harmonic_cos))
+                            )
+                            q_raw = (
+                                0.15
+                                + (1.10 * np.tanh(query_core))
+                                + (0.60 * np.tanh(query_core * edge_peak))
+                                + (0.30 * np.tanh((query_seed + node.content_b_query) * harmonic_sin))
+                            )
+                        else:
+                            k_raw = (
+                                1.0
+                                + (0.55 * np.tanh(key_core))
+                                + (0.28 * np.tanh(key_core * center_peak))
+                                + (0.15 * np.tanh((key_seed + node.content_b_key) * harmonic_cos))
+                            )
+                            q_raw = (
+                                1.0
+                                + (0.55 * np.tanh(query_core))
+                                + (0.30 * np.tanh(query_core * edge_peak))
+                                + (0.15 * np.tanh((query_seed + node.content_b_query) * harmonic_sin))
+                            )
                     else:
                         key_core = (
                             key_seed * (0.95 + (0.65 * center_peak))
