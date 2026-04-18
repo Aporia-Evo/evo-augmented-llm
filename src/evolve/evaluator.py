@@ -1306,7 +1306,7 @@ def _delta_retrieval_selection_pressure_bonus(metrics: Mapping[str, float]) -> f
 
     bonus = 0.0
     bonus += 0.45 * correct_value_selected
-    bonus += 0.22 * positive_query_match
+    bonus += 0.40 * positive_query_match
     bonus += 0.16 * positive_beta_gap
     bonus += 0.02 * correct_key_selected
     bonus -= 0.08 * abs(min(query_key_match_score, 0.0))
