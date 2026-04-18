@@ -1285,6 +1285,7 @@ def _delta_retrieval_selection_pressure_bonus(metrics: Mapping[str, float]) -> f
     query_key_match_score = float(metrics.get("query_key_match_score", 0.0) or 0.0)
     store_vs_distractor_beta_gap = float(metrics.get("store_vs_distractor_beta_gap", 0.0) or 0.0)
     correct_value_selected = float(metrics.get("correct_value_selected", 0.0) or 0.0)
+    value_margin = float(metrics.get("value_margin", 0.0) or 0.0)
 
     key_query_cosine_mean = float(metrics.get("key_query_cosine_mean", 0.0) or 0.0)
     key_query_cosine_at_query = float(metrics.get("key_query_cosine_at_query", 0.0) or 0.0)
@@ -1302,11 +1303,13 @@ def _delta_retrieval_selection_pressure_bonus(metrics: Mapping[str, float]) -> f
     # come from ``correct_value_selected`` (exact value-id match) and the
     # margin metric ``query_key_match_score``.
     signed_query_match = float(np.tanh(query_key_match_score))
+    signed_value_margin = float(np.tanh(value_margin))
     positive_beta_gap = float(np.tanh(max(store_vs_distractor_beta_gap, 0.0)))
 
     bonus = 0.0
     bonus += 0.45 * correct_value_selected
     bonus += 0.40 * signed_query_match
+    bonus += 0.25 * signed_value_margin
     bonus += 0.16 * positive_beta_gap
     bonus += 0.02 * correct_key_selected
 
