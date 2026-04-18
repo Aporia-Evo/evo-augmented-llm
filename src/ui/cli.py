@@ -94,6 +94,7 @@ VARIANT_CHOICES = [
     "stateful_v6_delta_memory",
     "stateful_v6_delta_memory_v16a",
     "stateful_v6_delta_memory_v16b",
+    "stateful_v6_delta_memory_v16c",
     "content_gated",
     "stateless",
     "stateful_plastic",
