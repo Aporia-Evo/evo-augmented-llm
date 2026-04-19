@@ -1095,6 +1095,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         *,
         step_roles: Sequence[str] | None = None,
         trace_sink: list[dict[str, object]] | None = None,
+        active_value_levels: Sequence[float] | None = None,
     ) -> np.ndarray:
         # ``trace_sink`` is a passive diagnostic hook. When ``None`` (the default
         # and the only value used on the production evaluation path), this
@@ -1772,7 +1773,27 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             * (0.9 + (0.25 * read_eligibility)),
                         ),
                     )
-                    next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
+                    query_competition_value = readout
+                    if step_role == "query" and active_value_levels is not None:
+                        level_values = np.asarray(active_value_levels, dtype=np.float64)
+                        if level_values.size > 0:
+                            level_centered = level_values - float(np.mean(level_values))
+                            level_scale = float(np.std(level_values)) + 1e-6
+                            score_scale = 1.2 + (0.9 * query_focus_quality) + (0.4 * value_contrast_gain)
+                            level_logits = score_scale * (
+                                (0.55 * selective_readout * level_values)
+                                + (0.35 * value_contrast_readout * (level_centered / level_scale))
+                                + (0.2 * contrast_readout * level_values)
+                                + (0.15 * read_contrast_term * (level_centered / level_scale))
+                                - (0.3 * ((level_values - read_mean) ** 2) / (read_abs_mean + 1e-6))
+                            )
+                            level_logits = level_logits - float(np.max(level_logits))
+                            level_weights = np.exp(level_logits)
+                            level_weights = level_weights / (float(np.sum(level_weights)) + 1e-9)
+                            query_competition_value = float(np.dot(level_weights, level_values))
+                    next_outputs[node.node_id] = math.tanh(
+                        summed_input + (read_gain * query_competition_value)
+                    )
                     key_norm_vals.append(float(np.linalg.norm(k_t)))
                     query_norm_vals.append(float(np.linalg.norm(q_t)))
                     key_variance_vals.append(key_variance)
@@ -1855,6 +1876,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             ),
                             "query_memory_alignment": query_memory_alignment_cap,
                             "readout_scalar": float(readout),
+                            "query_competition_value": float(query_competition_value),
                             "selective_readout": float(selective_readout),
                             "read_contrast": float(read_contrast),
                             "readout_selectivity": (
