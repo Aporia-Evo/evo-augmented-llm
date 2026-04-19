@@ -1,0 +1,18 @@
+# v16c scale-up: doubled evolution budget for fragility diagnosis.
+#
+# Context: with v16c + query-only readout fix (0217630) + threshold
+# recalibration (bef2dba), top-genome episode consistency on kv_easy is
+# stuck at 0.500 -- same genome solves 3/6 and fails 3/6 across seeds.
+# Failure mix is split between output_decoding and true write-collapse
+# (beta_gap < 0.02). Diagnosis: architectural fragility, not categorical
+# defect. Before further mechanistic work, test whether a larger search
+# budget lets evolution find more robust genomes.
+#
+# Layer on top of base.yaml + key_value_memory.yaml + local.yaml
+# + v16c_amp_magnitude.yaml.
+
+run:
+  generations: 36
+
+evolution:
+  population_size: 96
