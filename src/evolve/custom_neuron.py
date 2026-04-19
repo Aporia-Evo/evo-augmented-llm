@@ -1786,7 +1786,6 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     delta_mag = float(np.linalg.norm(delta_t))
                     delta_correction_vals.append(delta_mag)
                     memory_read_vals.append(float(np.linalg.norm(read_t)))
-                    readout_selectivity_vals.append(abs(selective_readout - read_mean) / (read_abs_mean + 1e-6))
                     novelty_ratio_vals.append(novelty_ratio)
                     readout_contrast_vals.append(read_contrast)
                     if step_role == "store":
@@ -1819,6 +1818,9 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         )
                         query_alignment_vals.append(query_memory_alignment_step)
                         key_query_cosine_query_vals.append(key_query_cos)
+                        readout_selectivity_vals.append(
+                            abs(selective_readout - read_mean) / (read_abs_mean + 1e-6)
+                        )
                     if step_capture is not None:
                         # Passive per-node snapshot of the delta-memory hot
                         # path. Overwritten on each activation sub-iteration so

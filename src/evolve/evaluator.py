@@ -594,6 +594,8 @@ class KeyValueMemoryEvaluator:
                 "key_query_cosine_at_query": float(getattr(episode_metrics, "key_query_cosine_at_query", 0.0)) if episode_metrics is not None else 0.0,
                 "key_variance_mean": float(getattr(episode_metrics, "key_variance_mean", 0.0)) if episode_metrics is not None else 0.0,
                 "query_variance_mean": float(getattr(episode_metrics, "query_variance_mean", 0.0)) if episode_metrics is not None else 0.0,
+                "readout_selectivity": float(getattr(episode_metrics, "readout_selectivity", 0.0)) if episode_metrics is not None else 0.0,
+                "query_memory_alignment": float(getattr(episode_metrics, "query_memory_alignment", 0.0)) if episode_metrics is not None else 0.0,
             }
             delta_selection_bonus = _delta_retrieval_selection_pressure_bonus(delta_bonus_inputs)
             task_metrics["delta_retrieval_selection_pressure_bonus"] = delta_selection_bonus
@@ -1291,6 +1293,8 @@ def _delta_retrieval_selection_pressure_bonus(metrics: Mapping[str, float]) -> f
     key_query_cosine_at_query = float(metrics.get("key_query_cosine_at_query", 0.0) or 0.0)
     key_variance_mean = float(metrics.get("key_variance_mean", 0.0) or 0.0)
     query_variance_mean = float(metrics.get("query_variance_mean", 0.0) or 0.0)
+    readout_selectivity = float(metrics.get("readout_selectivity", 0.0) or 0.0)
+    query_memory_alignment = float(metrics.get("query_memory_alignment", 0.0) or 0.0)
 
     # NOTE: ``correct_key_selected`` is *not* a reliable key-selection signal.
     # It is derived from value-distance ranking against in-sample competitor
@@ -1305,18 +1309,23 @@ def _delta_retrieval_selection_pressure_bonus(metrics: Mapping[str, float]) -> f
     signed_query_match = float(np.tanh(query_key_match_score))
     signed_value_margin = float(np.tanh(value_margin))
     positive_beta_gap = float(np.tanh(max(store_vs_distractor_beta_gap, 0.0)))
+    readout_peakiness = float(np.tanh(readout_selectivity * 4.0))
 
     bonus = 0.0
     bonus += 0.45 * correct_value_selected
     bonus += 0.40 * signed_query_match
     bonus += 0.25 * signed_value_margin
-    bonus += 0.16 * positive_beta_gap
+    bonus += 0.20 * readout_peakiness
+    bonus += 0.30 * positive_beta_gap
     bonus += 0.02 * correct_key_selected
 
     bonus -= 0.04 * max(0.0, key_query_cosine_mean - 0.50)
     bonus -= 0.04 * max(0.0, key_query_cosine_at_query - 0.50)
     bonus -= 0.02 * max(0.0, 0.02 - key_variance_mean)
     bonus -= 0.02 * max(0.0, 0.02 - query_variance_mean)
+    bonus -= 0.06 * max(0.0, 0.10 - readout_selectivity)
+    bonus -= 0.08 * max(0.0, 0.05 - store_vs_distractor_beta_gap)
+    bonus -= 0.08 * max(0.0, 0.20 - query_memory_alignment)
 
     return float(np.clip(bonus, -0.15, 0.85))
 
