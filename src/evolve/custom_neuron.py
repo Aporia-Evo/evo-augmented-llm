@@ -1535,56 +1535,23 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         + (0.1 * key_query_asym)
                     )
                     beta_base_existing = beta_mix * (1.0 - (0.3 * query_signal))
-                    key_query_collapse_signal = max(0.0, key_query_cos)
-                    write_selectivity_logit = (
-                        (0.9 * store_signal)
-                        + (0.45 * novelty_signal)
-                        + (0.35 * key_query_asym)
-                        + (0.25 * key_variance_signal)
-                        - (0.55 * query_signal)
-                        - (0.4 * key_query_collapse_signal)
-                        - (0.35 * query_collapse_signal)
-                    )
-                    write_eligibility = 0.5 + (0.5 * math.tanh(write_selectivity_logit))
-                    beta_mod = 0.08 * math.tanh(write_selectivity_logit)
+                    surprise_signal = math.tanh(0.85 * raw_delta_norm)
+                    role_guardrail = (0.08 * store_signal) - (0.06 * query_signal)
+                    beta_mod = 0.06 * math.tanh((0.8 * surprise_signal) + role_guardrail)
                     beta_t = beta_base_existing + beta_mod
                     beta_t = min(0.95, max(0.03, beta_t))
                     delta_t = _clip_vector_norm(delta_t, max_norm=delta_clip_norm)
-                    update_scale = 0.85 + (0.35 * write_eligibility)
-                    write_impact_logit = (
-                        (1.05 * store_signal)
-                        + (0.55 * write_eligibility)
-                        + (0.45 * novelty_signal)
-                        + (0.32 * key_variance_signal)
-                        + (0.3 * (1.0 - min(1.0, max(0.0, key_query_cos))))
-                        - (0.75 * query_signal)
-                        - (0.42 * projection_write_signal)
-                        - (0.3 * query_collapse_signal)
-                        - 0.95
+                    surprise_write_gate = min(
+                        1.2,
+                        max(
+                            0.55,
+                            0.65 + (0.5 * surprise_signal) + role_guardrail,
+                        ),
                     )
-                    write_impact_gate = 0.8 + (
-                        0.45
-                        * (0.5 + (0.5 * math.tanh(write_impact_logit)))
-                    )
-                    delta_selectivity_logit = (
-                        (0.95 * novelty_signal)
-                        + (0.52 * store_signal)
-                        + (0.4 * write_eligibility)
-                        + (0.32 * key_variance_signal)
-                        + (0.25 * (1.0 - min(1.0, max(0.0, key_query_cos))))
-                        - (0.6 * query_signal)
-                        - (0.4 * projection_write_signal)
-                        - (0.35 * query_collapse_signal)
-                        - 0.85
-                    )
-                    delta_selectivity = 0.85 + (
-                        0.35
-                        * (0.5 + (0.5 * math.tanh(delta_selectivity_logit)))
-                    )
-                    delta_t = delta_selectivity * delta_t
+                    update_scale = surprise_write_gate
                     update_focus_logit = (
                         (0.9 * store_signal)
-                        + (0.45 * write_eligibility)
+                        + (0.35 * surprise_signal)
                         + (0.35 * key_variance_signal)
                         + (0.35 * max(0.0, key_query_cos_base))
                         - (0.35 * query_signal)
@@ -1598,7 +1565,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         1.0
                         + math.tanh(
                             (0.95 * store_signal)
-                            + (0.45 * write_eligibility)
+                            + (0.35 * surprise_signal)
                             + (0.3 * key_variance_signal)
                             - (0.5 * query_signal)
                             - 0.55
@@ -1613,7 +1580,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                     )
                     update_address_logit = (
                         (0.95 * store_signal)
-                        + (0.45 * write_eligibility)
+                        + (0.35 * surprise_signal)
                         + (0.35 * key_variance_signal)
                         + (0.3 * projection_write_signal)
                         - (0.55 * query_signal)
@@ -1627,7 +1594,7 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             1e-6,
                         )
                     )
-                    effective_write_scale = beta_t * update_scale * write_impact_gate
+                    effective_write_scale = beta_t * update_scale
                     update = effective_write_scale * np.outer(delta_t, k_update)
                     update_norm = float(np.linalg.norm(update, ord="fro"))
                     if update_norm > update_clip_frob:
