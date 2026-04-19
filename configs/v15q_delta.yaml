@@ -1,0 +1,8 @@
+task:
+  curriculum_enabled: true
+  curriculum_phase_switch_generation: 6
+  key_value_profile: kv_full
+  curriculum_phase_1_key_value_profile: kv_easy
+  curriculum_phase_2_key_value_profile: kv_full
+  curriculum_phase_1_delay_steps: [8]
+  curriculum_phase_2_delay_steps: [8]
