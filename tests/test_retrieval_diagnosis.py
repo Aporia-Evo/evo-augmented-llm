@@ -157,14 +157,14 @@ def test_classify_failure_mode_none() -> None:
 
 
 def test_classify_failure_mode_write_selectivity() -> None:
-    trace = _make_trace(store_beta=0.30, distractor_beta=0.28)
+    trace = _make_trace(store_beta=0.300, distractor_beta=0.295)
     verdict = classify_failure_mode(
         trace,
         predicted_value_ids=[0],
         target_value_ids=[1],
     )
     assert verdict.mode == FAILURE_WRITE_SELECTIVITY
-    assert verdict.metric_value < 0.05
+    assert verdict.metric_value < 0.02
 
 
 def test_classify_failure_mode_query_alignment() -> None:
