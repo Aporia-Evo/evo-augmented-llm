@@ -95,12 +95,12 @@ def classify_failure_mode(
             metric_value=1.0,
             threshold=1.0,
         )
-    if beta_gap < 0.05:
+    if beta_gap < 0.02:
         return FailureVerdict(
             mode=FAILURE_WRITE_SELECTIVITY,
             metric_name="store_vs_distractor_beta_gap",
             metric_value=beta_gap,
-            threshold=0.05,
+            threshold=0.02,
         )
     if mean_query_alignment < 0.20:
         return FailureVerdict(
