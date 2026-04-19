@@ -59,11 +59,109 @@ def _positive_sum_normalize(vec: np.ndarray, eps: float = 1e-6) -> np.ndarray:
     return clipped / (float(np.sum(clipped)) + eps)
 
 
+def _product_key_focus(vec: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+    """Apply a product-key style cross-coupling between the two halves of an
+    address-focus vector.
+
+    The input is treated as a positive vector of even length ``d``; it is split
+    into two halves ``a`` and ``b`` of length ``d/2``. Each half's *raw*
+    (pre-normalization) mean is used as the cross-coupling scalar for the
+    opposite half. Each half is then sum-normalized independently, scaled by
+    the opposite raw mean, concatenated, and re-normalized to a positive
+    distribution.
+
+    The key property of this formulation is that the cross-coupling scalars
+    (``mean(raw_a)``, ``mean(raw_b)``) are computed **before** the per-half
+    sum normalization. Using them after sum normalization would reduce both
+    means to identical constants (``1/(d/2)``) and collapse the product-key
+    interaction to a trivial half-mass rebalancing. Here, a half that carries
+    more total positive mass in the raw input multiplicatively boosts the
+    *other* half's contribution after concatenation, so both halves must
+    carry meaningful positive mass for either to survive re-normalization.
+
+    For vectors of size < 2 or where either half has all non-positive
+    entries, this degrades gracefully to a plain positive sum normalization.
+    """
+
+    if vec.size < 2:
+        return _positive_sum_normalize(vec, eps=eps)
+    split = vec.size // 2
+    if split == 0 or split == vec.size:
+        return _positive_sum_normalize(vec, eps=eps)
+    raw_a = np.maximum(vec[:split], 0.0)
+    raw_b = np.maximum(vec[split:], 0.0)
+    sum_a = float(np.sum(raw_a))
+    sum_b = float(np.sum(raw_b))
+    if sum_a <= eps or sum_b <= eps:
+        return _positive_sum_normalize(vec, eps=eps)
+    mean_a = sum_a / float(split)
+    mean_b = sum_b / float(vec.size - split)
+    first_half = raw_a / (sum_a + eps)
+    second_half = raw_b / (sum_b + eps)
+    first_scaled = first_half * (mean_b + eps)
+    second_scaled = second_half * (mean_a + eps)
+    return _positive_sum_normalize(
+        np.concatenate((first_scaled, second_scaled)), eps=eps
+    )
+
+
 def _clip_vector_norm(vec: np.ndarray, max_norm: float, eps: float = 1e-9) -> np.ndarray:
     norm = float(np.linalg.norm(vec))
     if norm <= max_norm:
         return vec
     return vec * (max_norm / (norm + eps))
+
+
+_V15M_VALUE_DECODER_LEVELS = np.array([-1.0, 1.0], dtype=np.float64)
+_V15M_VALUE_DECODER_TEMPERATURE = 2.5
+
+
+def _value_level_logit_decode(
+    pre_decode: float,
+    value_levels: np.ndarray = _V15M_VALUE_DECODER_LEVELS,
+    temperature: float = _V15M_VALUE_DECODER_TEMPERATURE,
+) -> float:
+    """v15m: Bounded value-level logit decoder (query-step only).
+
+    Converts a scalar ``pre_decode`` (already tanh-bounded in [-1, 1])
+    into a softmax-weighted average over discrete value levels using
+    negative-distance logits. The lever replaces the single fragile
+    scalar decode with an explicit score over value levels, while
+    keeping the output shape unchanged. For the default binary levels
+    ``[-1, 1]`` the transform is equivalent to ``tanh(T * pre_decode)``
+    which sharpens weak signals without introducing hard thresholds.
+    """
+    levels = np.asarray(value_levels, dtype=np.float64)
+    distances = np.abs(float(pre_decode) - levels)
+    logits = -float(temperature) * distances
+    logits = logits - float(np.max(logits))
+    weights = np.exp(logits)
+    weights = weights / (float(np.sum(weights)) + 1e-9)
+    return float(np.sum(weights * levels))
+
+
+def _match_conditioned_focus_sharpen(
+    q_focus: np.ndarray, key_query_cos: float
+) -> np.ndarray:
+    """v15l-B: match-conditioned readout sharpening (query-step only).
+
+    When key/query alignment is positive, apply a small, bounded
+    power-sharpening of ``q_focus`` so that the downstream selective,
+    contrast and value-contrast readouts project ``read_t`` onto a
+    narrower set of slots. Strict no-op when ``key_query_cos <= 0``.
+    The exponent offset is capped at ~0.29 so an already-peaked
+    distribution cannot collapse to a Dirac spike, and a uniform
+    distribution is left effectively unchanged.
+    """
+    match_signal = max(0.0, float(key_query_cos))
+    sharpen_gate = math.tanh(2.0 * match_signal)
+    sharpen_exponent_delta = 0.3 * sharpen_gate
+    if sharpen_exponent_delta <= 1e-6:
+        return q_focus
+    q_focus_powered = np.power(
+        np.maximum(q_focus, 1e-9), 1.0 + sharpen_exponent_delta
+    )
+    return _positive_sum_normalize(q_focus_powered)
 
 
 @dataclass(frozen=True)
@@ -1106,7 +1204,17 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
         incoming_by_target = _incoming_connections_by_target(genome)
         d_key = 8
         d_value = 8
-        memory_decay = 0.97
+        # v15n-B: per-neuron evolvable retention, floored at the historical
+        # baseline. ``memory_decay`` is derived per-node from
+        # ``node.alpha_slow`` (a phantom parameter on the V6 delta-memory
+        # path until v15n-A) via
+        #     memory_decay = 0.97 + 0.02 * clip(alpha_slow, 0, 1)
+        # so alpha_slow=0 -> 0.97 (the prior hardcoded value) and
+        # alpha_slow=1 -> 0.99 (longer retention). v15n-A mapped to
+        # [0.90, 0.99] but evolution drifted ``alpha_slow`` downward,
+        # shortening retention and losing fitness. v15n-B removes that
+        # regressive local optimum: evolution can only *lengthen*
+        # retention relative to baseline, never shorten it.
         delta_clip_norm = 2.0
         update_clip_frob = 1.0
         read_clip_norm = 2.0
@@ -1277,8 +1385,15 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         )
                     k_raw = np.maximum(k_raw, 1e-3)
                     q_raw = np.maximum(q_raw, 1e-3)
-                    k_t_base = _positive_sum_normalize(k_raw)
-                    q_t_base = _positive_sum_normalize(q_raw)
+                    # V15k product-key addressing: split the raw k/q vectors
+                    # into two halves and cross-couple via the opposite-half
+                    # raw mean. See ``_product_key_focus`` for the formulation.
+                    # This is the only address-structure lever introduced by
+                    # v15k; the rest of the delta-memory mechanism (beta_t,
+                    # memory decay, v_hat_t, delta_t, outer-product update,
+                    # clipping, write-path signals) is unchanged.
+                    k_t_base = _product_key_focus(k_raw)
+                    q_t_base = _product_key_focus(q_raw)
                     key_variance_pre = float(np.var(k_t_base))
                     query_variance_pre = float(np.var(q_t_base))
                     key_query_asym = abs(key_seed) / (abs(key_seed) + abs(query_seed) + 1e-6)
@@ -1488,6 +1603,9 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                         dtype=np.float64,
                     )
                     state = memory_state[node.node_id]
+                    memory_decay = 0.97 + 0.02 * float(
+                        np.clip(node.alpha_slow, 0.0, 1.0)
+                    )
                     decayed_state = memory_decay * state
                     v_hat_t = decayed_state @ k_t
                     delta_base = v_base - v_hat_t
@@ -1700,6 +1818,12 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             )
                         )
                         q_focus = _positive_sum_normalize(np.maximum(q_focus, 1e-6))
+                        # v15l-B: match-conditioned extra power-sharpen of
+                        # q_focus when key/query alignment is positive. No-op
+                        # when key_query_cos <= 0; bounded exponent <= 1.29.
+                        q_focus = _match_conditioned_focus_sharpen(
+                            q_focus, key_query_cos
+                        )
                     read_mean = float(np.mean(read_t))
                     read_abs_mean = float(np.mean(np.abs(read_t)))
                     selective_readout = float(np.dot(read_t, q_focus))
@@ -1772,7 +1896,16 @@ class StatefulV6DeltaMemoryNetworkExecutor(StatefulNetworkExecutor):
                             * (0.9 + (0.25 * read_eligibility)),
                         ),
                     )
-                    next_outputs[node.node_id] = math.tanh(summed_input + (read_gain * readout))
+                    # v15m: replace the fragile scalar decode with a bounded
+                    # value-level logit decoder at query time only. Non-query
+                    # steps keep the plain tanh output unchanged.
+                    raw_decode = math.tanh(summed_input + (read_gain * readout))
+                    if step_role == "query":
+                        next_outputs[node.node_id] = _value_level_logit_decode(
+                            raw_decode
+                        )
+                    else:
+                        next_outputs[node.node_id] = raw_decode
                     key_norm_vals.append(float(np.linalg.norm(k_t)))
                     query_norm_vals.append(float(np.linalg.norm(q_t)))
                     key_variance_vals.append(key_variance)

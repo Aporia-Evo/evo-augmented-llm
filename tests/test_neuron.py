@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from evolve.custom_neuron import (
     AdaptivePlasticNetworkExecutor,
@@ -13,6 +14,10 @@ from evolve.custom_neuron import (
     StatefulV6DeltaMemoryNetworkExecutor,
     StatefulV4SlotsNetworkExecutor,
     StatefulV2NetworkExecutor,
+    _match_conditioned_focus_sharpen,
+    _positive_sum_normalize,
+    _product_key_focus,
+    _value_level_logit_decode,
     clamp_alpha,
     clamp_delta_weight,
     update_adaptive_delta_weight,
@@ -36,6 +41,156 @@ def test_delta_weight_is_clamped_symmetrically() -> None:
     assert clamp_delta_weight(-2.5, 1.0) == -1.0
     assert clamp_delta_weight(0.4, 1.0) == 0.4
     assert clamp_delta_weight(2.5, 1.0) == 1.0
+
+
+def test_product_key_focus_outputs_positive_distribution() -> None:
+    vec = np.array([0.2, 0.4, 0.1, 0.3, 0.5, 0.1, 0.2, 0.2], dtype=np.float64)
+
+    focus = _product_key_focus(vec)
+
+    assert focus.shape == vec.shape
+    assert np.all(focus >= 0.0)
+    assert float(np.sum(focus)) == pytest.approx(1.0, abs=1e-5)
+
+
+def test_product_key_focus_is_not_equivalent_to_plain_sum_normalize() -> None:
+    # A vector where the two halves carry very different total mass. The
+    # product-key cross-coupling must produce a distinctly different
+    # distribution from the plain positive sum normalization — otherwise the
+    # operator has collapsed into a no-op (the V15j regression we are
+    # guarding against).
+    vec = np.array([0.9, 0.8, 0.7, 0.6, 0.05, 0.05, 0.05, 0.05], dtype=np.float64)
+
+    plain = _positive_sum_normalize(vec)
+    pk = _product_key_focus(vec)
+
+    assert not np.allclose(plain, pk, atol=1e-4)
+
+
+def test_product_key_focus_is_not_equivalent_to_per_half_normalize_with_equal_mass() -> None:
+    # The V15j formulation reduced to "normalize each half independently then
+    # give each half 0.5 mass". Ensure _product_key_focus is *not* equivalent
+    # to that degenerate operation when the two halves carry unequal mass.
+    vec = np.array([0.9, 0.8, 0.7, 0.6, 0.05, 0.05, 0.05, 0.05], dtype=np.float64)
+
+    half_a = _positive_sum_normalize(vec[:4]) * 0.5
+    half_b = _positive_sum_normalize(vec[4:]) * 0.5
+    degenerate = np.concatenate((half_a, half_b))
+
+    pk = _product_key_focus(vec)
+
+    assert not np.allclose(degenerate, pk, atol=1e-4)
+
+
+def test_product_key_focus_couples_mass_between_halves() -> None:
+    # The product-key cross-coupling scales each half by the *opposite*
+    # half's raw mean. That means a half with large raw mean shrinks its
+    # counterpart's multiplier on its own side (it scales the opposite half
+    # by a large factor and itself by a small one). The net effect is a
+    # symmetry-breaking penalty against per-half imbalance: the half that
+    # started dominant in raw mass ends up contributing *less* total mass
+    # after renormalization, while the subordinate half gets boosted.
+    vec = np.array([0.9, 0.8, 0.7, 0.6, 0.05, 0.05, 0.05, 0.05], dtype=np.float64)
+
+    pk = _product_key_focus(vec)
+
+    # raw mean_a = 0.75, raw mean_b = 0.05. After cross-coupling the
+    # originally-heavy first half must now carry *less* than half the mass.
+    assert float(np.sum(pk[:4])) < 0.5
+    assert float(np.sum(pk[4:])) > 0.5
+    # But the operation is symmetric: swap halves and the relation flips.
+    vec_swapped = np.array(
+        [0.05, 0.05, 0.05, 0.05, 0.9, 0.8, 0.7, 0.6], dtype=np.float64
+    )
+    pk_swapped = _product_key_focus(vec_swapped)
+    assert float(np.sum(pk_swapped[:4])) > 0.5
+    assert float(np.sum(pk_swapped[4:])) < 0.5
+
+
+def test_product_key_focus_degrades_gracefully_for_tiny_vectors() -> None:
+    single = np.array([0.4], dtype=np.float64)
+    assert np.allclose(_product_key_focus(single), _positive_sum_normalize(single))
+
+    empty_half = np.array([0.2, 0.3, 0.4, 0.0, 0.0, 0.0], dtype=np.float64)
+    focus = _product_key_focus(empty_half)
+    # Second half has zero mass -> fall back to plain positive sum normalize.
+    assert np.allclose(focus, _positive_sum_normalize(empty_half))
+
+
+def test_match_conditioned_focus_sharpen_is_noop_on_nonpositive_match() -> None:
+    # v15l-B: negative or zero key/query cosine must leave q_focus untouched
+    # so the new lever cannot amplify mis-aligned readouts.
+    q_focus = _positive_sum_normalize(
+        np.array([0.05, 0.1, 0.6, 0.05, 0.05, 0.05, 0.05, 0.05], dtype=np.float64)
+    )
+    for cos in (-0.9, -0.1, 0.0):
+        sharpened = _match_conditioned_focus_sharpen(q_focus, cos)
+        assert np.allclose(sharpened, q_focus)
+
+
+def test_match_conditioned_focus_sharpen_increases_peak_but_stays_bounded() -> None:
+    # v15l-B: at maximum positive match the sharpening must (a) raise the
+    # peak probability, (b) lower Shannon entropy, but (c) stay bounded so
+    # an already-peaked distribution does not collapse into a Dirac spike.
+    q_focus = _positive_sum_normalize(
+        np.array([0.04, 0.06, 0.5, 0.04, 0.06, 0.2, 0.05, 0.05], dtype=np.float64)
+    )
+    sharpened = _match_conditioned_focus_sharpen(q_focus, 1.0)
+    assert sharpened.max() > q_focus.max()
+    assert sharpened.max() < 0.95  # bounded - no dirac collapse
+    base_entropy = -float(np.sum(q_focus * np.log(q_focus + 1e-12)))
+    sharp_entropy = -float(np.sum(sharpened * np.log(sharpened + 1e-12)))
+    assert sharp_entropy < base_entropy
+    assert np.isclose(float(np.sum(sharpened)), 1.0, atol=1e-6)
+
+
+def test_match_conditioned_focus_sharpen_leaves_uniform_distribution_unchanged() -> None:
+    # v15l-B: power-sharpening a uniform distribution must be a fixed point
+    # (any positive exponent on a constant vector renormalises back to itself),
+    # so the lever cannot inject spurious structure where there is none.
+    uniform = np.full(8, 1.0 / 8.0, dtype=np.float64)
+    sharpened = _match_conditioned_focus_sharpen(uniform, 1.0)
+    assert np.allclose(sharpened, uniform)
+
+
+def test_value_level_decode_is_symmetric_around_zero() -> None:
+    # v15m: the decoder must be antisymmetric under sign flip of the
+    # pre-decode scalar (default levels [-1, +1] are symmetric around 0).
+    for x in (-0.9, -0.4, 0.0, 0.3, 0.7):
+        assert np.isclose(
+            _value_level_logit_decode(x) + _value_level_logit_decode(-x),
+            0.0,
+            atol=1e-12,
+        )
+
+
+def test_value_level_decode_stays_bounded_inside_level_hull() -> None:
+    # v15m: softmax-weighted average over levels must stay inside the
+    # convex hull of the levels, regardless of the pre-decode scalar.
+    for x in (-5.0, -1.0, -0.5, 0.0, 0.5, 1.0, 5.0):
+        decoded = _value_level_logit_decode(x)
+        assert -1.0 <= decoded <= 1.0
+
+
+def test_value_level_decode_sharpens_weak_signals() -> None:
+    # v15m: a weak positive pre-decode (e.g. 0.3) must map to a strictly
+    # larger positive output so the decoder exerts real sharpening; the
+    # default temperature 2.5 is the intervention.
+    assert _value_level_logit_decode(0.3) > 0.3
+    assert _value_level_logit_decode(-0.3) < -0.3
+    # At the origin the decoder must be a fixed point (no drift).
+    assert np.isclose(_value_level_logit_decode(0.0), 0.0, atol=1e-12)
+
+
+def test_value_level_decode_supports_custom_level_sets() -> None:
+    # v15m: custom value_levels must work and the weighted average must
+    # stay inside the level hull for non-binary sets too.
+    levels = np.array([-1.0, -0.5, 0.0, 0.5, 1.0], dtype=np.float64)
+    decoded = _value_level_logit_decode(0.4, value_levels=levels)
+    assert -1.0 <= decoded <= 1.0
+    # Closer to 0.5 than to 0 when pre_decode is 0.4, so output should
+    # sit between 0.0 and 0.5 rather than jumping to the extreme.
+    assert 0.0 < decoded < 0.6
 
 
 def test_plastic_executor_matches_stateful_when_eta_is_zero() -> None:
@@ -451,6 +606,84 @@ def test_stateful_v6_delta_memory_updates_state_and_reports_metrics() -> None:
         metrics.query_memory_alignment,
         metrics.key_query_cosine_at_query,
         atol=1e-6,
+    )
+
+
+def _v6_delta_memory_genome(*, alpha_slow: float) -> GenomeModel:
+    return GenomeModel(
+        input_ids=(0, 1, 2),
+        output_ids=(3,),
+        nodes=(
+            NodeGeneModel(node_id=0, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(node_id=1, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(node_id=2, bias=0.0, alpha=0.0, is_input=True),
+            NodeGeneModel(
+                node_id=3,
+                bias=0.0,
+                alpha=0.6,
+                alpha_slow=alpha_slow,
+                content_w_key=0.9,
+                content_b_key=0.2,
+                content_w_query=1.1,
+                content_b_query=0.1,
+                content_temperature=1.2,
+                content_b_match=0.3,
+                is_output=True,
+            ),
+        ),
+        connections=(
+            ConnectionGeneModel(in_id=0, out_id=3, historical_marker=0, weight=1.0, enabled=True, eta=0.0),
+            ConnectionGeneModel(in_id=1, out_id=3, historical_marker=1, weight=0.5, enabled=True, eta=0.0),
+            ConnectionGeneModel(in_id=2, out_id=3, historical_marker=2, weight=-0.25, enabled=True, eta=0.0),
+        ),
+    )
+
+
+def test_v6_delta_memory_alpha_slow_controls_retention() -> None:
+    # v15n-B: node.alpha_slow is the per-neuron memory_decay knob for the
+    # V6 delta-memory executor, mapped to [0.97, 0.99] — i.e. floored at
+    # the historical hardcoded baseline so evolution can only lengthen
+    # retention, never shorten it. Verify that two genomes which are
+    # identical except for ``alpha_slow`` diverge in memory-retention
+    # diagnostics over a long distractor delay, with alpha_slow=1.0 (max
+    # retention, decay=0.99) carrying strictly more residual memory than
+    # alpha_slow=0.0 (baseline, decay=0.97).
+    executor = StatefulV6DeltaMemoryNetworkExecutor(activation_steps=1)
+
+    # One store step, a long sequence of distractor steps to exercise
+    # memory decay, then a query. Low alpha_slow => baseline decay 0.97;
+    # high alpha_slow => extended decay 0.99. After 10 distractor steps
+    # the Frobenius norm difference must be observable.
+    sequence = (
+        [[1.0, 0.0, 0.0]]
+        + [[0.2, 0.8, 0.0]] * 10
+        + [[0.0, 1.0, 0.0]]
+    )
+    roles = ["store"] + (["distractor"] * 10) + ["query"]
+
+    genome_baseline = _v6_delta_memory_genome(alpha_slow=0.0)  # decay = 0.97
+    genome_long = _v6_delta_memory_genome(alpha_slow=1.0)      # decay = 0.99
+
+    executor.run_sequence(genome_baseline, sequence, step_roles=roles)
+    metrics_baseline = executor.last_episode_metrics()
+    executor.run_sequence(genome_long, sequence, step_roles=roles)
+    metrics_long = executor.last_episode_metrics()
+
+    # High-retention genome must carry a strictly larger residual memory
+    # mass at query time than the baseline-floored one.
+    assert (
+        metrics_long.mean_memory_frobenius_norm
+        > metrics_baseline.mean_memory_frobenius_norm + 1e-3
+    )
+    # Monotonicity sanity: a mid-range alpha_slow should sit strictly
+    # between the two endpoints on the same metric.
+    genome_mid = _v6_delta_memory_genome(alpha_slow=0.5)
+    executor.run_sequence(genome_mid, sequence, step_roles=roles)
+    metrics_mid = executor.last_episode_metrics()
+    assert (
+        metrics_baseline.mean_memory_frobenius_norm
+        < metrics_mid.mean_memory_frobenius_norm
+        < metrics_long.mean_memory_frobenius_norm
     )
 
 
